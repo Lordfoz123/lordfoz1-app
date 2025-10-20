@@ -1,216 +1,196 @@
-import {
-    addDoc,
-    collection,
-    limit as fsLimit,
-    getDocs,
-    orderBy,
-    query,
-    serverTimestamp,
-    where
-} from 'firebase/firestore';
-import { Platform } from 'react-native';
+import { addDoc, collection, getDocs, limit, orderBy, query, Timestamp, where } from 'firebase/firestore';
 import { db } from './firebase';
 
-// Guardar ubicación en Firebase
-export const saveLocationToFirebase = async (location: any, userId: string): Promise<string> => {
+export interface LocationData {
+  userId: string;
+  userName: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  timestamp: Date;
+  speed?: number;
+  heading?: number;
+}
+
+/**
+ * Guardar ubicación en Firestore
+ * Se guarda cada vez que el GPS detecta movimiento
+ */
+export const saveLocation = async (locationData: LocationData) => {
   try {
-    console.log('\n🔥 === INTENTANDO GUARDAR EN FIREBASE ===');
-    console.log('🔥 Firebase db objeto:', typeof db);
-    console.log('🔥 Colección destino:', 'locations');
-    console.log('🔥 Usuario:', userId);
-    console.log('🔥 Coordenadas:', {
-      lat: location.coords.latitude,
-      lng: location.coords.longitude
-    });
-    console.log('🔥 Datos completos a guardar:', {
-      userId: userId,
-      latitude: location.coords.latitude,
-      longitude: location.coords.longitude,
-      altitude: location.coords.altitude || null,
-      accuracy: location.coords.accuracy || null,
-      speed: location.coords.speed || null,
-      heading: location.coords.heading || null,
-      timestamp: location.timestamp,
-      createdAt: 'serverTimestamp()',
-      platform: Platform.OS
-    });
-    
-    console.log('🔥 Llamando a addDoc() de Firestore...');
-    
     const docRef = await addDoc(collection(db, 'locations'), {
-      userId: userId,
-      latitude: location.coords.latitude,
-      longitude: location.coords.longitude,
-      altitude: location.coords.altitude || null,
-      accuracy: location.coords.accuracy || null,
-      speed: location.coords.speed || null,
-      heading: location.coords.heading || null,
-      timestamp: location.timestamp,
-      createdAt: serverTimestamp(),
-      platform: Platform.OS
+      ...locationData,
+      timestamp: Timestamp.fromDate(locationData.timestamp),
+      createdAt: Timestamp.now(),
     });
     
-    console.log('✅ addDoc() completado exitosamente');
-    console.log('✅ Documento creado con ID:', docRef.id);
-    console.log('✅ Path completo:', docRef.path);
-    console.log('✅ Colección:', docRef.parent.id);
-    console.log('🔥 === GUARDADO EN FIREBASE EXITOSO ===\n');
-    
+    console.log('📍 Ubicación guardada en Firebase:', docRef.id);
     return docRef.id;
-    
-  } catch (error: any) {
-    console.error('\n❌ === ERROR CRÍTICO EN FIREBASE ===');
-    console.error('❌ Tipo de error:', typeof error);
-    console.error('❌ Error completo:', error);
-    console.error('❌ Mensaje:', error.message);
-    console.error('❌ Código:', error.code);
-    console.error('❌ Name:', error.name);
-    
-    if (error.stack) {
-      console.error('❌ Stack trace:', error.stack);
-    }
-    
-    if (error.code) {
-      console.error('❌ Firebase error code:', error.code);
-      
-      // Errores comunes
-      if (error.code === 'permission-denied') {
-        console.error('❌ PERMISOS DENEGADOS: Revisa las reglas de Firestore');
-      } else if (error.code === 'unavailable') {
-        console.error('❌ FIREBASE NO DISPONIBLE: Revisa conexión a internet');
-      } else if (error.code === 'unauthenticated') {
-        console.error('❌ NO AUTENTICADO: Se requiere autenticación');
-      }
-    }
-    
-    console.error('❌ === FIN ERROR FIREBASE ===\n');
+  } catch (error) {
+    console.error('❌ Error guardando ubicación:', error);
     throw error;
   }
 };
 
-// Obtener ubicaciones desde Firebase
-export const getLocationsFromFirebase = async (userId: string, limit: number = 50): Promise<any[]> => {
+/**
+ * Obtener últimas ubicaciones de un usuario específico
+ * @param userId - ID del usuario
+ * @param limitCount - Número máximo de ubicaciones a obtener (default: 50)
+ */
+export const getUserLocations = async (userId: string, limitCount: number = 50) => {
   try {
-    console.log('\n📥 === LEYENDO DE FIREBASE ===');
-    console.log('📥 Usuario:', userId);
-    console.log('📥 Límite:', limit);
-    console.log('📥 Construyendo query...');
-    
     const q = query(
       collection(db, 'locations'),
       where('userId', '==', userId),
-      orderBy('createdAt', 'desc'),
-      fsLimit(limit)
+      orderBy('timestamp', 'desc'),
+      limit(limitCount)
     );
     
-    console.log('📥 Ejecutando getDocs()...');
     const querySnapshot = await getDocs(q);
+    const locations: any[] = [];
     
-    console.log('📥 Documentos recibidos:', querySnapshot.size);
-    
-    const locations = querySnapshot.docs.map(doc => {
+    querySnapshot.forEach((doc) => {
       const data = doc.data();
-      console.log('📄 Documento ID:', doc.id);
-      console.log('📄 Datos:', data);
-      return {
+      locations.push({
         id: doc.id,
-        ...data
-      };
+        ...data,
+        // Convertir Timestamp de Firebase a Date
+        timestamp: data.timestamp?.toDate(),
+        createdAt: data.createdAt?.toDate(),
+      });
     });
     
-    console.log('✅ Total ubicaciones procesadas:', locations.length);
-    
-    if (locations.length > 0) {
-      console.log('📊 Primera ubicación:', JSON.stringify(locations[0], null, 2));
-      console.log('📊 Última ubicación:', JSON.stringify(locations[locations.length - 1], null, 2));
-    } else {
-      console.log('⚠️ No se encontraron ubicaciones para el usuario:', userId);
-    }
-    
-    console.log('📥 === FIN LECTURA FIREBASE ===\n');
-    
+    console.log(`📍 Obtenidas ${locations.length} ubicaciones para usuario ${userId}`);
     return locations;
-    
-  } catch (error: any) {
-    console.error('\n❌ === ERROR LEYENDO FIREBASE ===');
-    console.error('❌ Error completo:', error);
-    console.error('❌ Mensaje:', error.message);
-    console.error('❌ Código:', error.code);
-    
-    if (error.code === 'failed-precondition') {
-      console.error('❌ ÍNDICE REQUERIDO: La consulta necesita un índice');
-      console.error('❌ Revisa la pestaña Índices en Firebase Console');
-    }
-    
-    console.error('❌ === FIN ERROR LECTURA ===\n');
-    return [];
+  } catch (error) {
+    console.error('❌ Error obteniendo ubicaciones:', error);
+    throw error;
   }
 };
 
-// Obtener última ubicación
-export const getLastLocationFromFirebase = async (userId: string): Promise<any | null> => {
+/**
+ * Obtener la última ubicación registrada de un usuario
+ * @param userId - ID del usuario
+ */
+export const getLastLocation = async (userId: string) => {
   try {
-    console.log('📍 Obteniendo última ubicación de Firebase...');
-    const locations = await getLocationsFromFirebase(userId, 1);
-    
-    if (locations.length > 0) {
-      console.log('✅ Última ubicación encontrada:', locations[0]);
-      return locations[0];
-    } else {
-      console.log('⚠️ No hay ubicaciones para el usuario:', userId);
-      return null;
-    }
-    
+    const locations = await getUserLocations(userId, 1);
+    return locations[0] || null;
   } catch (error) {
     console.error('❌ Error obteniendo última ubicación:', error);
-    return null;
+    throw error;
   }
 };
 
-// FUNCIÓN TEMPORAL: Leer TODO sin filtros (para debug)
-export const getAllLocationsFromFirebase = async (limit: number = 50): Promise<any[]> => {
+/**
+ * Obtener ubicaciones de un usuario en un rango de fechas
+ * @param userId - ID del usuario
+ * @param startDate - Fecha inicial
+ * @param endDate - Fecha final
+ */
+export const getUserLocationsByDateRange = async (
+  userId: string,
+  startDate: Date,
+  endDate: Date
+) => {
   try {
-    console.log('\n📥 === LEYENDO TODO DE FIREBASE (SIN FILTROS) ===');
-    console.log('📥 Límite:', limit);
-    
     const q = query(
       collection(db, 'locations'),
-      fsLimit(limit)
+      where('userId', '==', userId),
+      where('timestamp', '>=', Timestamp.fromDate(startDate)),
+      where('timestamp', '<=', Timestamp.fromDate(endDate)),
+      orderBy('timestamp', 'desc')
     );
     
-    console.log('📥 Ejecutando getDocs() sin filtros...');
     const querySnapshot = await getDocs(q);
+    const locations: any[] = [];
     
-    console.log('📥 Total documentos en colección:', querySnapshot.size);
-    
-    const locations = querySnapshot.docs.map(doc => {
+    querySnapshot.forEach((doc) => {
       const data = doc.data();
-      return {
+      locations.push({
         id: doc.id,
-        ...data
-      };
+        ...data,
+        timestamp: data.timestamp?.toDate(),
+        createdAt: data.createdAt?.toDate(),
+      });
     });
     
-    console.log('✅ Ubicaciones encontradas:', locations.length);
-    
-    if (locations.length > 0) {
-      console.log('📊 TODAS LAS UBICACIONES:');
-      locations.forEach((loc: any, index: number) => {
-        console.log(`  ${index + 1}. ID: ${loc.id}, userId: ${loc.userId || 'N/A'}, lat: ${loc.latitude || 'N/A'}, lng: ${loc.longitude || 'N/A'}`);
-      });
-    } else {
-      console.log('⚠️ La colección "locations" está vacía');
-    }
-    
-    console.log('📥 === FIN LECTURA SIN FILTROS ===\n');
-    
+    console.log(`📍 Obtenidas ${locations.length} ubicaciones entre ${startDate} y ${endDate}`);
     return locations;
-    
-  } catch (error: any) {
-    console.error('\n❌ === ERROR LEYENDO SIN FILTROS ===');
-    console.error('❌ Error:', error);
-    console.error('❌ Mensaje:', error.message);
-    console.error('❌ === FIN ERROR ===\n');
-    return [];
+  } catch (error) {
+    console.error('❌ Error obteniendo ubicaciones por rango de fechas:', error);
+    throw error;
   }
+};
+
+/**
+ * Obtener todas las ubicaciones de hoy de un usuario
+ * @param userId - ID del usuario
+ */
+export const getTodayLocations = async (userId: string) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // Inicio del día
+  
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1); // Fin del día
+  
+  return getUserLocationsByDateRange(userId, today, tomorrow);
+};
+
+/**
+ * Calcular distancia total recorrida entre ubicaciones (en kilómetros)
+ * Usa la fórmula de Haversine
+ */
+export const calculateTotalDistance = (locations: LocationData[]): number => {
+  if (locations.length < 2) return 0;
+  
+  let totalDistance = 0;
+  
+  for (let i = 0; i < locations.length - 1; i++) {
+    const loc1 = locations[i];
+    const loc2 = locations[i + 1];
+    
+    totalDistance += haversineDistance(
+      loc1.latitude,
+      loc1.longitude,
+      loc2.latitude,
+      loc2.longitude
+    );
+  }
+  
+  return totalDistance;
+};
+
+/**
+ * Fórmula de Haversine para calcular distancia entre dos coordenadas
+ * Retorna la distancia en kilómetros
+ */
+const haversineDistance = (
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number => {
+  const R = 6371; // Radio de la Tierra en kilómetros
+  const dLat = toRadians(lat2 - lat1);
+  const dLon = toRadians(lon2 - lon1);
+  
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) *
+      Math.cos(toRadians(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c;
+  
+  return distance;
+};
+
+/**
+ * Convertir grados a radianes
+ */
+const toRadians = (degrees: number): number => {
+  return degrees * (Math.PI / 180);
 };

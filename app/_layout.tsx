@@ -1,24 +1,54 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { Slot, useRouter, useSegments } from 'expo-router';
+import { useEffect } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+function RootLayoutNav() {
+  const { user, loading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+  useEffect(() => {
+    if (loading) {
+      console.log('⏳ Cargando estado de autenticación...');
+      return;
+    }
+
+    const inAuthGroup = segments[0] === '(auth)';
+
+    console.log('🔄 Verificando navegación...');
+    console.log('Usuario autenticado:', user ? user.email : 'No');
+    console.log('Segmentos actuales:', segments);
+    console.log('En grupo auth:', inAuthGroup);
+
+    if (user && !loading) {
+      console.log('✅ Usuario autenticado, redirigiendo a (tabs)');
+      if (inAuthGroup) {
+        router.replace('/(tabs)');
+      }
+    } else if (!user && !loading) {
+      console.log('❌ Usuario no autenticado, redirigiendo a (auth)');
+      if (!inAuthGroup) {
+        router.replace('/(auth)');
+      }
+    }
+  }, [user, loading, segments]);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' }}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </View>
+    );
+  }
+
+  return <Slot />;
+}
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <AuthProvider>
+      <RootLayoutNav />
+    </AuthProvider>
   );
 }

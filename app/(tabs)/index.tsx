@@ -1,531 +1,456 @@
-import {
-  Ionicons,
-  MaterialIcons
-} from '@expo/vector-icons';
-import * as Location from 'expo-location';
+import { useAuth } from '@/contexts/AuthContext';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
+  Animated,
+  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  useColorScheme,
+  View,
 } from 'react-native';
-import { getAllLocations, saveLocationLocally } from '../../services/storageService';
-
+import GPSService from '../../services/GPSService';
 
 export default function HomeScreen() {
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [tracking, setTracking] = useState(false);
-  const [savedCount, setSavedCount] = useState(0);
-  const subscriptionRef = useRef<Location.LocationSubscription | null>(null);
-  const isSavingRef = useRef(false);
+  const { user, userName, userRole, signOut } = useAuth();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const router = useRouter();
 
-  // Cargar contador al iniciar
-useEffect(() => {
-  (async () => {
-    try {
-      console.log('📥 Cargando ubicaciones guardadas...');
-      const locations = await getAllLocations();
-      setSavedCount(locations.length);
-      console.log('✅ Contador cargado:', locations.length);
-    } catch (error) {
-      console.error('❌ Error cargando contador:', error);
+  const [isTracking, setIsTracking] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState<any>(null);
+  
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      StatusBar.setBarStyle('light-content');
+      StatusBar.setBackgroundColor('#4CAF50');
     }
-  })();
-}, []);
+  }, []);
 
-  // Solicitar permisos
-  const requestLocationPermission = async () => {
-    try {
-      console.log('📍 Solicitando permisos de ubicación...');
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      console.log('📍 Estado de permisos:', status);
-      
-      if (status !== 'granted') {
-        setErrorMsg('Permiso denegado');
-        Alert.alert('Error', 'Necesitamos permiso para acceder a tu ubicación');
-        return false;
-      }
-      
-      console.log('✅ Permisos concedidos');
-      return true;
-    } catch (error: any) {
-      console.error('❌ Error solicitando permisos:', error);
-      setErrorMsg('Error al solicitar permisos');
-      return false;
+  useEffect(() => {
+    checkGPSStatus();
+  }, []);
+
+  useEffect(() => {
+    if (isTracking) {
+      const pulseAnimation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.5,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseAnimation.start();
+      return () => pulseAnimation.stop();
+    } else {
+      pulseAnim.setValue(1);
     }
-  };
+  }, [isTracking]);
 
-  // Guardar ubicación (con protección contra duplicados)
-  const saveLocation = async (loc: Location.LocationObject) => {
-    console.log('\n💾 === saveLocation INICIANDO ===');
+  const checkGPSStatus = async () => {
+    const tracking = await GPSService.isTracking();
+    setIsTracking(tracking);
     
-    // Prevenir guardados simultáneos
-    if (isSavingRef.current) {
-      console.log('⏭️ Ya hay guardado en proceso, saltando...');
-      return;
-    }
-
-    try {
-      isSavingRef.current = true;
-      console.log('🔒 Flag de guardado: ACTIVADO');
-      
-      console.log('🔥 Llamando a saveLocationToFirebase...');
-      console.log('📦 Datos:', {
-        userId: 'lordfoz123',
-        lat: loc.coords.latitude,
-        lng: loc.coords.longitude
-      });
-      
-const docId = await saveLocationLocally(loc, 'lordfoz123');
-
-      console.log('✅ Firebase respondió con ID:', docId);
-      
-      setSavedCount(prev => {
-        const newCount = prev + 1;
-        console.log('📊 Contador actualizado:', prev, '→', newCount);
-        return newCount;
-      });
-      
-      console.log('✅ saveLocation: COMPLETADO');
-      return docId;
-      
-    } catch (error: any) {
-      console.error('\n❌ === ERROR EN saveLocation ===');
-      console.error('❌ Error completo:', error);
-      console.error('❌ Error name:', error?.name);
-      console.error('❌ Error message:', error?.message);
-      console.error('❌ Error stack:', error?.stack);
-      console.error('❌ === FIN ERROR ===\n');
-      throw error;
-      
-    } finally {
-      isSavingRef.current = false;
-      console.log('🔓 Flag de guardado: LIBERADO');
-      console.log('💾 === saveLocation FINALIZADO ===\n');
+    if (tracking) {
+      const location = await GPSService.getCurrentLocation();
+      setCurrentLocation(location);
     }
   };
 
-  // Obtener ubicación actual (una sola vez)
-  const getCurrentLocation = async () => {
-    console.log('\n🎯 === getCurrentLocation INICIANDO ===');
-    setLoading(true);
-    setErrorMsg(null);
-
-    // Timeout de seguridad
-    const timeoutId = setTimeout(() => {
-      console.log('⏰ TIMEOUT: 15 segundos cumplidos, forzando fin de loading');
-      setLoading(false);
-      Alert.alert('Timeout', 'La operación tardó demasiado. Intenta de nuevo.');
-    }, 15000);
-
+  const handleStartTracking = async () => {
     try {
-      console.log('📍 Paso 1: Solicitando permisos...');
-      const hasPermission = await requestLocationPermission();
-      
-      if (!hasPermission) {
-        console.log('❌ Permisos denegados, abortando...');
-        clearTimeout(timeoutId);
-        setLoading(false);
+      if (!user) {
+        Alert.alert('Error', 'Debes iniciar sesión para usar el GPS');
         return;
       }
 
-      console.log('📍 Paso 2: Obteniendo ubicación GPS...');
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
+      await GPSService.startTracking(user.uid);
+      setIsTracking(true);
       
-      console.log('✅ Ubicación GPS obtenida:', {
-        lat: loc.coords.latitude,
-        lng: loc.coords.longitude,
-        accuracy: loc.coords.accuracy
-      });
-      
-      setLocation(loc);
-      
-      console.log('📍 Paso 3: Guardando en Firebase...');
-      
-      try {
-        await saveLocation(loc);
-        console.log('✅ Guardado exitoso');
-        clearTimeout(timeoutId);
-        setLoading(false);
-        Alert.alert('✅ Éxito', 'Ubicación guardada en Firebase');
-        
-      } catch (saveError: any) {
-        console.error('❌ Error al guardar:', saveError);
-        clearTimeout(timeoutId);
-        setLoading(false);
-        Alert.alert('⚠️ Ubicación obtenida', 'Pero no se pudo guardar en Firebase');
-      }
-      
-    } catch (error: any) {
-      console.error('\n❌ === ERROR GENERAL ===');
-      console.error('❌ Error:', error);
-      console.error('❌ Message:', error?.message);
-      console.error('❌ === FIN ERROR ===\n');
-      
-      clearTimeout(timeoutId);
-      setLoading(false);
-      setErrorMsg('Error al obtener ubicación');
-      Alert.alert('Error', `No se pudo obtener la ubicación: ${error.message}`);
-    }
-    
-    console.log('🎯 === getCurrentLocation FINALIZADO ===\n');
-  };
+      const interval = setInterval(async () => {
+        const location = await GPSService.getCurrentLocation();
+        setCurrentLocation(location);
+      }, 5000);
 
-  // Iniciar seguimiento continuo
-  const startTracking = async () => {
-    console.log('\n🔄 === INICIANDO SEGUIMIENTO CONTINUO ===');
-    
-    const hasPermission = await requestLocationPermission();
-    if (!hasPermission) {
-      console.log('❌ No hay permisos, abortando seguimiento');
-      return;
-    }
-
-    setTracking(true);
-    Alert.alert('🟢 Seguimiento iniciado', 'Se guardará cada 30 segundos o 50 metros');
-
-    try {
-      console.log('⏰ Configurando watchPositionAsync...');
-      console.log('⏰ Intervalo: 30 segundos');
-      console.log('📏 Distancia: 50 metros');
-      
-      const subscription = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 30000, // 30 segundos
-          distanceInterval: 50, // 50 metros
-        },
-        async (loc) => {
-          console.log('\n📍 === NUEVA UBICACIÓN RECIBIDA (watchPosition) ===');
-          console.log('📍 Lat:', loc.coords.latitude);
-          console.log('📍 Lng:', loc.coords.longitude);
-          console.log('📍 Timestamp:', new Date(loc.timestamp).toLocaleTimeString());
-          
-          setLocation(loc);
-          
-          try {
-            await saveLocation(loc);
-            console.log('✅ Ubicación auto-guardada');
-          } catch (error) {
-            console.error('❌ Error en auto-guardado:', error);
-          }
-          
-          console.log('📍 === FIN NUEVA UBICACIÓN ===\n');
-        }
-      );
-
-      subscriptionRef.current = subscription;
-      console.log('✅ Seguimiento configurado exitosamente');
-      console.log('🔄 === SEGUIMIENTO ACTIVO ===\n');
-      
-    } catch (error: any) {
-      console.error('❌ Error iniciando seguimiento:', error);
-      setTracking(false);
-      Alert.alert('Error', 'No se pudo iniciar el seguimiento');
-    }
-  };
-
-  // Detener seguimiento
-  const stopTracking = () => {
-    console.log('\n🛑 === DETENIENDO SEGUIMIENTO ===');
-    
-    if (subscriptionRef.current) {
-      subscriptionRef.current.remove();
-      subscriptionRef.current = null;
-      console.log('✅ Suscripción removida');
-    }
-    
-    setTracking(false);
-    isSavingRef.current = false;
-    
-    console.log('📊 Total guardadas:', savedCount);
-    Alert.alert('🔴 Seguimiento detenido', `Se guardaron ${savedCount} ubicaciones`);
-    console.log('🛑 === SEGUIMIENTO DETENIDO ===\n');
-  };
-
-  // Cargar datos al montar y limpiar al desmontar
-useEffect(() => {
-  console.log('🎬 Componente montado');
-  
-  // Cargar contador de ubicaciones guardadas
-  const loadSavedCount = async () => {
-    try {
-      console.log('📥 Cargando ubicaciones guardadas...');
-      const locations = await getAllLocations();
-      console.log('📊 Ubicaciones encontradas:', locations.length);
-      setSavedCount(locations.length);
-      console.log('✅ Contador inicializado en:', locations.length);
+      return () => clearInterval(interval);
     } catch (error) {
-      console.error('❌ Error cargando contador:', error);
+      console.error('Error al iniciar tracking:', error);
+      Alert.alert('Error', 'No se pudo activar el GPS');
     }
   };
-  
-  loadSavedCount();
-  
-  return () => {
-    console.log('🎬 Componente desmontado, limpiando...');
-    if (subscriptionRef.current) {
-      subscriptionRef.current.remove();
+
+  const handleStopTracking = async () => {
+    try {
+      await GPSService.stopTracking();
+      setIsTracking(false);
+      setCurrentLocation(null);
+    } catch (error) {
+      console.error('Error al detener tracking:', error);
+      Alert.alert('Error', 'No se pudo desactivar el GPS');
     }
   };
-}, []);
+
+  const handleSignOut = async () => {
+    Alert.alert(
+      'Cerrar Sesión',
+      '¿Estás seguro que deseas cerrar sesión?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Cerrar Sesión',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await signOut();
+              router.replace('/(auth)');
+            } catch (error) {
+              console.error('Error al cerrar sesión:', error);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Buenos días';
+    if (hour < 19) return 'Buenas tardes';
+    return 'Buenas noches';
+  };
+
+  const displayName = userName || user?.displayName || user?.email?.split('@')[0] || 'Usuario';
+
+  // TODO: En el futuro, estos datos vendrán de Firestore
+  const routes = [
+    {
+      id: 1,
+      name: 'Ruta Centro',
+      totalPoints: 6,
+      completedPoints: 3,
+      points: [
+        { id: 1, status: 'completed' },
+        { id: 2, status: 'completed' },
+        { id: 3, status: 'completed' },
+        { id: 4, status: 'current' },
+        { id: 5, status: 'pending' },
+        { id: 6, status: 'pending' },
+      ],
+    },
+    {
+      id: 2,
+      name: 'Ruta Norte',
+      totalPoints: 5,
+      completedPoints: 2,
+      points: [
+        { id: 1, status: 'completed' },
+        { id: 2, status: 'completed' },
+        { id: 3, status: 'current' },
+        { id: 4, status: 'pending' },
+        { id: 5, status: 'pending' },
+      ],
+    },
+  ];
+
+  const getPointColor = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return '#4CAF50';
+      case 'current':
+        return '#FFC107';
+      case 'pending':
+        return '#2196F3';
+      default:
+        return '#666';
+    }
+  };
 
   return (
-    <>
-      <StatusBar barStyle="light-content" />
-      <ScrollView style={styles.container}>
-        <View style={styles.content}>
-          
-          {/* Header */}
-          <View style={styles.header}>
-            <Ionicons name="location" size={64} color="white" />
-            <Text style={styles.title}>GPS Tracking App</Text>
-            <Text style={styles.subtitle}>Lordfoz123</Text>
-          </View>
-
-          {/* Card de Estado */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <MaterialIcons 
-                name={tracking ? "gps-fixed" : "gps-not-fixed"} 
-                size={24} 
-                color={tracking ? "#25d366" : "#999"} 
-              />
-              <Text style={styles.cardTitle}>
-                Estado: {tracking ? 'Rastreando' : 'Detenido'}
-              </Text>
+    <View style={[styles.container, isDark && styles.containerDark]}>
+      <StatusBar barStyle="light-content" backgroundColor="#4CAF50" />
+      
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <View style={styles.headerTop}>
+            <View style={styles.headerLeft}>
+              <Text style={styles.greeting}>{getGreeting()}</Text>
+              <Text style={styles.userName}>Bienvenido, {displayName}</Text>
             </View>
-            
-            <View style={styles.statsRow}>
-              <View style={styles.statBox}>
-                <Ionicons name="cloud-upload" size={24} color="#4a90e2" />
-                <Text style={styles.statNumber}>{savedCount}</Text>
-                <Text style={styles.statLabel}>Guardadas</Text>
-              </View>
-              
-              <View style={styles.statBox}>
-                <Ionicons name="wifi" size={24} color="#25d366" />
-                <Text style={styles.statNumber}>Firebase</Text>
-                <Text style={styles.statLabel}>Conectado</Text>
-              </View>
-            </View>
-
-            {loading && (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#4a90e2" />
-                <Text style={styles.loadingText}>Obteniendo ubicación...</Text>
-              </View>
-            )}
-
-            {errorMsg && (
-              <View style={styles.errorContainer}>
-                <Ionicons name="alert-circle" size={20} color="#f44336" />
-                <Text style={styles.errorText}>{errorMsg}</Text>
-              </View>
-            )}
-          </View>
-
-          {/* Card de Ubicación */}
-          {location && (
-            <View style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Ionicons name="map" size={24} color="#4a90e2" />
-                <Text style={styles.cardTitle}>Última Ubicación</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Latitud:</Text>
-                <Text style={styles.dataValue}>
-                  {location.coords.latitude.toFixed(6)}°
-                </Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Longitud:</Text>
-                <Text style={styles.dataValue}>
-                  {location.coords.longitude.toFixed(6)}°
-                </Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Altitud:</Text>
-                <Text style={styles.dataValue}>
-                  {location.coords.altitude?.toFixed(2) || 'N/A'} m
-                </Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Precisión:</Text>
-                <Text style={styles.dataValue}>
-                  ±{location.coords.accuracy?.toFixed(2)} m
-                </Text>
-              </View>
-
-              {location.coords.speed !== null && (
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>Velocidad:</Text>
-                  <Text style={styles.dataValue}>
-                    {((location.coords.speed || 0) * 3.6).toFixed(2)} km/h
-                  </Text>
-                </View>
-              )}
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Hora:</Text>
-                <Text style={styles.dataValue}>
-                  {new Date(location.timestamp).toLocaleTimeString()}
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {/* Botones de Control */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <MaterialIcons name="control-camera" size={24} color="#9c27b0" />
-              <Text style={styles.cardTitle}>Controles</Text>
-            </View>
-
-            <TouchableOpacity 
-              style={[styles.button, styles.buttonPrimary, (loading || tracking) && styles.buttonDisabled]} 
-              onPress={getCurrentLocation}
-              disabled={loading || tracking}
-            >
-              <Ionicons name="navigate" size={20} color="white" />
-              <Text style={styles.buttonText}>Obtener Ubicación Única</Text>
+            <TouchableOpacity onPress={handleSignOut} style={styles.logoutButton}>
+              <Ionicons name="log-out-outline" size={24} color="#fff" />
             </TouchableOpacity>
-
-            {!tracking ? (
-              <TouchableOpacity 
-                style={[styles.button, styles.buttonSuccess, loading && styles.buttonDisabled]} 
-                onPress={startTracking}
-                disabled={loading}
-              >
-                <MaterialIcons name="play-arrow" size={20} color="white" />
-                <Text style={styles.buttonText}>Iniciar Auto-Guardado</Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity 
-                style={[styles.button, styles.buttonDanger]} 
-                onPress={stopTracking}
-              >
-                <MaterialIcons name="stop" size={20} color="white" />
-                <Text style={styles.buttonText}>Detener Seguimiento</Text>
-              </TouchableOpacity>
-            )}
-
-              {/* BOTÓN TEMPORAL: LEER FIREBASE */}
-  <TouchableOpacity 
-    style={[styles.button, { backgroundColor: '#e91e63', marginTop: 20 }]} 
-    onPress={async () => {
-      try {
-        console.log('\n📥 === LEYENDO DE FIREBASE ===');
-        const { getLocationsFromFirebase } = require('../../services/locationService');
-        const locations = await getLocationsFromFirebase('lordfoz123', 20);
-        
-        console.log('📊 Ubicaciones en Firebase:', locations.length);
-        
-        if (locations.length > 0) {
-          console.log('📊 Primera ubicación:', JSON.stringify(locations[0], null, 2));
-          console.log('📊 Última ubicación:', JSON.stringify(locations[locations.length - 1], null, 2));
-        }
-        
-        Alert.alert(
-          '✅ Firebase', 
-          `${locations.length} ubicaciones encontradas en Firebase\n\n` +
-          `Revisa la terminal de tu Mac para ver los detalles completos.`
-        );
-        
-      } catch (error: any) {
-        console.error('❌ Error leyendo Firebase:', error);
-        Alert.alert('❌ Error', `No se pudo leer de Firebase:\n${error.message}`);
-      }
-    }}
-  >
-    <Ionicons name="cloud-download" size={20} color="white" />
-    <Text style={styles.buttonText}>📥 LEER FIREBASE</Text>
-  </TouchableOpacity>
           </View>
-
-          {/* Info */}
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Ionicons name="information-circle" size={24} color="#00bcd4" />
-              <Text style={styles.cardTitle}>Información</Text>
-            </View>
-            
-            <View style={styles.infoRow}>
-              <Ionicons name="checkmark-circle" size={20} color="#25d366" />
-              <Text style={styles.infoText}>
-                Auto-guardado: cada 30 segundos o 50 metros
-              </Text>
-            </View>
-            
-            <View style={styles.infoRow}>
-              <Ionicons name="checkmark-circle" size={20} color="#25d366" />
-              <Text style={styles.infoText}>
-                Todas las ubicaciones se guardan en Firebase
-              </Text>
-            </View>
-            
-            <View style={styles.infoRow}>
-              <Ionicons name="checkmark-circle" size={20} color="#25d366" />
-              <Text style={styles.infoText}>
-                Los datos están disponibles desde cualquier dispositivo
-              </Text>
-            </View>
+          <View style={styles.dateTimeContainer}>
+            <Ionicons name="calendar-outline" size={16} color="#fff" />
+            <Text style={styles.dateTime}>
+              {new Date().toLocaleDateString('es-ES', { 
+                weekday: 'long', 
+                day: 'numeric', 
+                month: 'short' 
+              })}
+            </Text>
+            <Ionicons name="time-outline" size={16} color="#fff" style={{ marginLeft: 12 }} />
+            <Text style={styles.dateTime}>
+              {new Date().toLocaleTimeString('es-ES', { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+              })}
+            </Text>
           </View>
-
         </View>
+
+        <View style={[styles.card, isDark && styles.cardDark]}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="flash" size={24} color="#4CAF50" />
+            <Text style={[styles.cardTitle, isDark && styles.textDark]}>
+              Estado del Servicio
+            </Text>
+          </View>
+
+          <View style={styles.statusContainer}>
+            <View style={[styles.statusIndicator, isDark && styles.statusIndicatorDark, isTracking && styles.statusIndicatorActive]}>
+              <View style={[styles.statusDot, isTracking && styles.statusDotActive]} />
+              {isTracking && (
+                <Animated.View
+                  style={[
+                    styles.pulseRing,
+                    {
+                      transform: [{ scale: pulseAnim }],
+                      opacity: pulseAnim.interpolate({
+                        inputRange: [1, 1.5],
+                        outputRange: [0.5, 0],
+                      }),
+                    },
+                  ]}
+                />
+              )}
+            </View>
+            <View style={styles.statusTextContainer}>
+              <View style={styles.statusTitleRow}>
+                {isTracking && <View style={styles.activeDot} />}
+                <Text style={[styles.statusTitle, isDark && styles.textDark]}>
+                  {isTracking ? 'GPS Activo' : 'GPS Inactivo'}
+                </Text>
+              </View>
+              <Text style={[styles.statusSubtitle, isDark && styles.textSecondaryDark]}>
+                {isTracking 
+                  ? 'Precisión: Alta • Sincronizando' 
+                  : 'Toca el botón para iniciar'
+                }
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.scheduleContainer, isDark && styles.borderDark]}>
+            <Ionicons name="time-outline" size={20} color={isDark ? '#999' : '#666'} />
+            <Text style={[styles.scheduleText, isDark && styles.textSecondaryDark]}>
+              Horario Laboral: 08:00 - 18:00
+            </Text>
+          </View>
+
+          <View style={styles.progressContainer}>
+            <View style={styles.progressHeader}>
+              <Text style={[styles.progressLabel, isDark && styles.textSecondaryDark]}>
+                Progreso del Día
+              </Text>
+              <Text style={styles.progressPercentage}>38%</Text>
+            </View>
+            <View style={[styles.progressBar, isDark && styles.progressBarDark]}>
+              <View style={[styles.progressFill, { width: '38%' }]} />
+            </View>
+            <Text style={[styles.progressSubtext, isDark && styles.textSecondaryDark]}>
+              3 de 8 puntos completados
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.statsRow}>
+          <View style={[styles.statCard, styles.statCardBlue]}>
+            <View style={styles.statIconContainer}>
+              <Ionicons name="ellipse-outline" size={32} color="#2196F3" />
+            </View>
+            <Text style={styles.statNumber}>5</Text>
+            <Text style={[styles.statLabel, isDark && styles.textSecondaryDark]}>Pendientes</Text>
+          </View>
+
+          <View style={[styles.statCard, styles.statCardOrange]}>
+            <View style={styles.statIconContainer}>
+              <Ionicons name="navigate" size={32} color="#FF9800" />
+            </View>
+            <Text style={styles.statNumber}>1</Text>
+            <Text style={[styles.statLabel, isDark && styles.textSecondaryDark]}>Siguiente</Text>
+          </View>
+
+          <View style={[styles.statCard, styles.statCardGreen]}>
+            <View style={styles.statIconContainer}>
+              <Ionicons name="checkmark-circle" size={32} color="#4CAF50" />
+            </View>
+            <Text style={styles.statNumber}>3</Text>
+            <Text style={[styles.statLabel, isDark && styles.textSecondaryDark]}>Completados</Text>
+          </View>
+        </View>
+
+        <View style={[styles.distanceCard, isDark && styles.distanceCardDark]}>
+          <View style={styles.distanceItem}>
+            <Ionicons name="trending-up" size={24} color="#4CAF50" />
+            <Text style={styles.distanceNumber}>8.5 km</Text>
+            <Text style={[styles.distanceLabel, isDark && styles.textSecondaryDark]}>
+              Recorridos Hoy
+            </Text>
+          </View>
+
+          <View style={[styles.distanceDivider, isDark && styles.distanceDividerDark]} />
+
+          <View style={styles.distanceItem}>
+            <Ionicons name="time" size={24} color="#4CAF50" />
+            <Text style={styles.distanceNumber}>2h 15min</Text>
+            <Text style={[styles.distanceLabel, isDark && styles.textSecondaryDark]}>
+              Tiempo Activo
+            </Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.trackingButton, isTracking && styles.trackingButtonActive]}
+          onPress={isTracking ? handleStopTracking : handleStartTracking}
+        >
+          <Ionicons 
+            name={isTracking ? 'stop-circle' : 'play-circle'} 
+            size={24} 
+            color="#fff" 
+          />
+          <Text style={styles.trackingButtonText}>
+            {isTracking ? 'Detener Monitoreo' : 'Iniciar Monitoreo'}
+          </Text>
+        </TouchableOpacity>
+
+        <View style={[styles.routesSection]}>
+          <View style={styles.routesHeader}>
+            <Ionicons name="location" size={24} color="#4CAF50" />
+            <Text style={[styles.routesTitle, isDark && styles.textDark]}>Rutas de Hoy</Text>
+          </View>
+
+          {routes.map((route) => (
+            <TouchableOpacity
+              key={route.id}
+              style={[styles.routeCard, isDark && styles.routeCardDark]}
+              onPress={() => {
+                Alert.alert('Ruta', `Navegando a ${route.name}`);
+              }}
+            >
+              <View style={styles.routeInfo}>
+                <Text style={[styles.routeName, isDark && styles.textDark]}>
+                  {route.name}
+                </Text>
+                
+                <View style={styles.routeProgress}>
+                  {route.points.map((point) => (
+                    <View
+                      key={point.id}
+                      style={[
+                        styles.routePoint,
+                        { backgroundColor: getPointColor(point.status) }
+                      ]}
+                    />
+                  ))}
+                </View>
+                
+                <Text style={[styles.routeSubtext, isDark && styles.textSecondaryDark]}>
+                  {route.completedPoints} de {route.totalPoints} puntos completados
+                </Text>
+              </View>
+
+              <Ionicons name="navigate" size={24} color="#4CAF50" />
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={{ height: 100 }} />
       </ScrollView>
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#4a90e2',
+    backgroundColor: '#f5f5f5',
   },
-  content: {
-    padding: 20,
-    paddingTop: 60,
-    paddingBottom: 40,
+  containerDark: {
+    backgroundColor: '#121212',
+  },
+  scrollView: {
+    flex: 1,
   },
   header: {
-    alignItems: 'center',
-    marginBottom: 30,
+    backgroundColor: '#4CAF50',
+    padding: 20,
+    paddingTop: Platform.OS === 'android' ? 20 : 50,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: 'white',
-    marginTop: 10,
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
-  subtitle: {
+  headerLeft: {
+    flex: 1,
+  },
+  logoutButton: {
+    padding: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 8,
+  },
+  greeting: {
     fontSize: 16,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 5,
+    color: '#E8F5E9',
+    fontWeight: '500',
+  },
+  userName: {
+    fontSize: 28,
+    color: '#fff',
+    fontWeight: 'bold',
+    marginTop: 4,
+  },
+  dateTimeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  dateTime: {
+    fontSize: 14,
+    color: '#E8F5E9',
+    marginLeft: 6,
   },
   card: {
-    backgroundColor: 'white',
-    borderRadius: 16,
+    backgroundColor: '#ffffff',
+    margin: 16,
+    marginBottom: 8,
     padding: 20,
-    marginBottom: 16,
+    borderRadius: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowRadius: 4,
     elevation: 3,
+  },
+  cardDark: {
+    backgroundColor: '#1e1e1e',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -536,101 +461,280 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
-    marginLeft: 10,
+    marginLeft: 8,
+  },
+  textDark: {
+    color: '#fff',
+  },
+  textSecondaryDark: {
+    color: '#999',
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  statusIndicator: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+    position: 'relative',
+  },
+  statusIndicatorDark: {
+    backgroundColor: '#2a2a2a',
+  },
+  statusIndicatorActive: {
+    backgroundColor: '#E8F5E9',
+  },
+  statusDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#999',
+    zIndex: 2,
+  },
+  statusDotActive: {
+    backgroundColor: '#4CAF50',
+  },
+  pulseRing: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#4CAF50',
+    zIndex: 1,
+  },
+  statusTextContainer: {
+    flex: 1,
+  },
+  statusTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  activeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4CAF50',
+    marginRight: 8,
+  },
+  statusTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  statusSubtitle: {
+    fontSize: 14,
+    color: '#666',
+  },
+  scheduleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    marginTop: 12,
+  },
+  borderDark: {
+    borderTopColor: '#333',
+  },
+  scheduleText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 8,
+  },
+  progressContainer: {
+    marginTop: 16,
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  progressLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  progressPercentage: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarDark: {
+    backgroundColor: '#333',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#4CAF50',
+  },
+  progressSubtext: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
   },
   statsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 10,
+    paddingHorizontal: 16,
+    gap: 12,
+    marginBottom: 16,
   },
-  statBox: {
+  statCard: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 16,
     alignItems: 'center',
   },
+  statCardBlue: {
+    backgroundColor: '#E3F2FD',
+  },
+  statCardOrange: {
+    backgroundColor: '#FFF3E0',
+  },
+  statCardGreen: {
+    backgroundColor: '#E8F5E9',
+  },
+  statIconContainer: {
+    marginBottom: 8,
+  },
   statNumber: {
-    fontSize: 20,
+    fontSize: 32,
     fontWeight: 'bold',
     color: '#333',
-    marginTop: 8,
+    marginBottom: 4,
   },
   statLabel: {
     fontSize: 12,
     color: '#666',
-    marginTop: 4,
   },
-  loadingContainer: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  loadingText: {
-    marginTop: 10,
-    color: '#666',
-    fontSize: 14,
-  },
-  errorContainer: {
+  distanceCard: {
+    backgroundColor: '#ffffff',
+    marginHorizontal: 16,
+    padding: 20,
+    borderRadius: 16,
     flexDirection: 'row',
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  distanceCardDark: {
+    backgroundColor: '#1e1e1e',
+  },
+  distanceItem: {
+    flex: 1,
     alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#ffebee',
-    borderRadius: 8,
-    marginTop: 10,
   },
-  errorText: {
-    marginLeft: 8,
-    color: '#f44336',
-    fontSize: 14,
-  },
-  dataRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  dataLabel: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '600',
-  },
-  dataValue: {
-    fontSize: 14,
-    color: '#333',
+  distanceNumber: {
+    fontSize: 24,
     fontWeight: 'bold',
+    color: '#4CAF50',
+    marginTop: 8,
+    marginBottom: 4,
   },
-  button: {
-    padding: 16,
-    borderRadius: 12,
+  distanceLabel: {
+    fontSize: 12,
+    color: '#666',
+  },
+  distanceDivider: {
+    width: 1,
+    backgroundColor: '#e0e0e0',
+    marginHorizontal: 16,
+  },
+  distanceDividerDark: {
+    backgroundColor: '#333',
+  },
+  trackingButton: {
+    backgroundColor: '#4CAF50',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
+    marginHorizontal: 16,
+    padding: 18,
+    borderRadius: 16,
+    marginBottom: 24,
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  buttonPrimary: {
-    backgroundColor: '#4a90e2',
-  },
-  buttonSuccess: {
-    backgroundColor: '#25d366',
-  },
-  buttonDanger: {
+  trackingButtonActive: {
     backgroundColor: '#f44336',
+    shadowColor: '#f44336',
   },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  buttonText: {
-    color: 'white',
+  trackingButtonText: {
+    color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 8,
   },
-  infoRow: {
+  routesSection: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  routesHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  routesTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginLeft: 8,
+  },
+  routeCard: {
+    backgroundColor: '#ffffff',
+    padding: 16,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  routeCardDark: {
+    backgroundColor: '#1e1e1e',
+  },
+  routeInfo: {
+    flex: 1,
+  },
+  routeName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
     marginBottom: 12,
   },
-  infoText: {
-    marginLeft: 10,
+  routeProgress: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  routePoint: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  routeSubtext: {
+    fontSize: 12,
     color: '#666',
-    fontSize: 14,
-    flex: 1,
   },
 });
