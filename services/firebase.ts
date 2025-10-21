@@ -4,16 +4,23 @@ import { getFirestore, initializeFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { Platform } from 'react-native';
 
-// 🔥 CONFIGURACIÓN DE FIREBASE
-// Las credenciales están directamente aquí para que funcione sin problemas
+// 🔥 CONFIGURACIÓN DE FIREBASE desde variables de entorno
 const firebaseConfig = {
-  apiKey: "AIzaSyAcnldObgeNJoeetWA2TouyXl0zzsq5k_0",
-  authDomain: "gps-tracking-lordfoz.firebaseapp.com",
-  projectId: "gps-tracking-lordfoz",
-  storageBucket: "gps-tracking-lordfoz.firebasestorage.app",
-  messagingSenderId: "4737521891",
-  appId: "1:4737521891:web:f855e5494e37cf14cec7bc"
+  apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
 };
+
+// Validación de configuración
+if (!firebaseConfig.apiKey) {
+  console.error('❌ Error: No se encontró la configuración de Firebase.');
+  console.error('📄 Asegúrate de tener un archivo .env con las credenciales.');
+  console.error('📋 Ejemplo: EXPO_PUBLIC_FIREBASE_API_KEY=tu_api_key_aqui');
+  throw new Error('Falta configuración de Firebase. Verifica tu archivo .env');
+}
 
 console.log('🔥 Inicializando Firebase para:', Platform.OS);
 console.log('📦 Project ID:', firebaseConfig.projectId);
