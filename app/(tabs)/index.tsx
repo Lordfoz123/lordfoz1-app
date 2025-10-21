@@ -17,7 +17,7 @@ import {
 import GPSService from '../../services/GPSService';
 
 export default function HomeScreen() {
-  const { user, userName, userRole, signOut } = useAuth();
+  const { user, userName, userRole } = useAuth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const router = useRouter();
@@ -104,28 +104,6 @@ export default function HomeScreen() {
     }
   };
 
-  const handleSignOut = async () => {
-    Alert.alert(
-      'Cerrar Sesión',
-      '¿Estás seguro que deseas cerrar sesión?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Cerrar Sesión',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await signOut();
-              router.replace('/(auth)');
-            } catch (error) {
-              console.error('Error al cerrar sesión:', error);
-            }
-          },
-        },
-      ]
-    );
-  };
-
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Buenos días';
@@ -190,9 +168,6 @@ export default function HomeScreen() {
               <Text style={styles.greeting}>{getGreeting()}</Text>
               <Text style={styles.userName}>Bienvenido, {displayName}</Text>
             </View>
-            <TouchableOpacity onPress={handleSignOut} style={styles.logoutButton}>
-              <Ionicons name="log-out-outline" size={24} color="#fff" />
-            </TouchableOpacity>
           </View>
           <View style={styles.dateTimeContainer}>
             <Ionicons name="calendar-outline" size={16} color="#fff" />
@@ -410,11 +385,6 @@ const styles = StyleSheet.create({
   },
   headerLeft: {
     flex: 1,
-  },
-  logoutButton: {
-    padding: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 8,
   },
   greeting: {
     fontSize: 16,
