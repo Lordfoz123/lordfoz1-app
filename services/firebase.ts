@@ -5,6 +5,7 @@ import { getStorage } from 'firebase/storage';
 import { Platform } from 'react-native';
 
 // 🔥 CONFIGURACIÓN DE FIREBASE
+// Las credenciales están directamente aquí para que funcione sin problemas
 const firebaseConfig = {
   apiKey: "AIzaSyAcnldObgeNJoeetWA2TouyXl0zzsq5k_0",
   authDomain: "gps-tracking-lordfoz.firebaseapp.com",
