@@ -1,19 +1,19 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    useColorScheme,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useColorScheme,
+  View,
 } from 'react-native';
 
 export default function LoginScreen() {
@@ -22,7 +22,6 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  const router = useRouter();
   const { login } = useAuth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -44,10 +43,15 @@ export default function LoginScreen() {
       console.log('🔐 Iniciando login desde UI...');
       await login(email, password);
       console.log('✅ Login completado desde UI');
+      
+      // ✅ Esperar medio segundo para que el contexto actualice
+      await new Promise(resolve => setTimeout(resolve, 500));
+      console.log('🚀 Redirigiendo a tabs...');
+      router.replace('/(tabs)');
+      
     } catch (error: any) {
       console.error('❌ Error en handleLogin:', error);
       Alert.alert('Error', error.message || 'No se pudo iniciar sesión');
-    } finally {
       setLoading(false);
     }
   };
@@ -129,6 +133,7 @@ export default function LoginScreen() {
           {/* Link a Recuperar Contraseña */}
           <TouchableOpacity
             style={styles.forgotPasswordContainer}
+            onPress={() => router.push('/(auth)/forgot-password')}
             disabled={loading}
           >
             <Text style={styles.forgotPasswordText}>¿Olvidaste tu contraseña?</Text>

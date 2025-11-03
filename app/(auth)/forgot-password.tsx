@@ -1,206 +1,282 @@
-import { BaseColors, BorderRadius, FontSizes, Spacing } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
-import { useThemeColor } from '@/hooks/useThemeColor';
-import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
-import { ArrowLeft, Mail, Send } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useColorScheme,
+  View,
 } from 'react-native';
 
 export default function ForgotPasswordScreen() {
-  const { colors } = useThemeColor();
-  const { resetPassword } = useAuth();
   const [email, setEmail] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const router = useRouter();
+  const { resetPassword } = useAuth();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
 
   const handleResetPassword = async () => {
-    if (!email) {
-      Alert.alert('Error', 'Por favor ingresa tu correo electrónico');
+    if (!email.trim()) {
+      Alert.alert('Error', 'Por favor ingresa tu email');
       return;
     }
 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setIsLoading(true);
+    // Validación básica de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      Alert.alert('Error', 'Por favor ingresa un email válido');
+      return;
+    }
+
+    setLoading(true);
 
     try {
+      console.log('📧 Solicitando recuperación de contraseña...');
       await resetPassword(email);
+      
       Alert.alert(
-        '¡Enviado!', 
-        'Revisa tu correo para restablecer tu contraseña',
-        [{ text: 'OK', onPress: () => router.back() }]
+        '✅ ¡Correo enviado!',
+        'Revisa tu bandeja de entrada. Te hemos enviado un enlace para restablecer tu contraseña.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              console.log('Usuario confirmó recepción del correo');
+              router.back();
+            },
+          },
+        ]
       );
     } catch (error: any) {
-      Alert.alert('Error', error.message);
+      console.error('❌ Error en recuperación:', error);
+      Alert.alert('Error', error.message || 'No se pudo enviar el correo');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   return (
-    <>
-      <StatusBar barStyle="light-content" backgroundColor={BaseColors.primary} />
-      <KeyboardAvoidingView
-        style={[styles.container, { backgroundColor: colors.bgSecondary }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={[styles.container, isDark && styles.containerDark]}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
       >
-        <ScrollView 
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={[styles.header, { backgroundColor: BaseColors.primary }]}>
-            <TouchableOpacity 
-              style={styles.backButton}
-              onPress={() => router.back()}
-            >
-              <ArrowLeft size={24} color="#FFF" />
-            </TouchableOpacity>
-            
-            <View style={styles.iconContainer}>
-              <Mail size={64} color="#FFF" strokeWidth={2} />
-            </View>
-            <Text style={styles.title}>Recuperar Contraseña</Text>
-            <Text style={styles.subtitle}>Te enviaremos un correo</Text>
+        {/* Header con botón de regresar */}
+        <View style={styles.headerContainer}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+            disabled={loading}
+          >
+            <Ionicons name="arrow-back" size={24} color={isDark ? '#fff' : '#333'} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.header}>
+          <View style={[styles.iconContainer, isDark && styles.iconContainerDark]}>
+            <Ionicons name="mail" size={60} color="#4CAF50" />
+          </View>
+          <Text style={[styles.title, isDark && styles.titleDark]}>Recuperar Contraseña</Text>
+          <Text style={[styles.subtitle, isDark && styles.subtitleDark]}>
+            Te enviaremos un enlace de recuperación
+          </Text>
+        </View>
+
+        <View style={styles.form}>
+          <Text style={[styles.description, isDark && styles.descriptionDark]}>
+            Ingresa tu correo electrónico y te enviaremos un enlace para restablecer tu contraseña.
+          </Text>
+
+          {/* Campo Email */}
+          <View style={[styles.inputContainer, isDark && styles.inputContainerDark]}>
+            <Ionicons name="mail-outline" size={20} color={isDark ? '#999' : '#666'} style={styles.inputIcon} />
+            <TextInput
+              style={[styles.input, isDark && styles.inputDark]}
+              placeholder="Email"
+              placeholderTextColor={isDark ? '#666' : '#999'}
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoComplete="email"
+              editable={!loading}
+            />
           </View>
 
-          <View style={styles.formContainer}>
-            <View style={[styles.card, { backgroundColor: colors.cardBg }]}>
-              <Text style={[styles.description, { color: colors.textSecondary }]}>
-                Ingresa tu correo electrónico y te enviaremos un enlace para restablecer tu contraseña.
-              </Text>
+          {/* Botón Enviar */}
+          <TouchableOpacity
+            style={[styles.button, loading && styles.buttonDisabled]}
+            onPress={handleResetPassword}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="send" size={20} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.buttonText}>Enviar Enlace</Text>
+              </>
+            )}
+          </TouchableOpacity>
 
-              <View style={styles.inputContainer}>
-                <Mail size={20} color={colors.textSecondary} />
-                <TextInput
-                  style={[styles.input, { color: colors.textPrimary }]}
-                  placeholder="Correo electrónico"
-                  placeholderTextColor={colors.textTertiary}
-                  value={email}
-                  onChangeText={setEmail}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoComplete="email"
-                />
-              </View>
-
-              <TouchableOpacity
-                style={[styles.button, { backgroundColor: BaseColors.primary }]}
-                onPress={handleResetPassword}
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <>
-                    <Send size={20} color="#FFF" />
-                    <Text style={styles.buttonText}>Enviar Enlace</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </>
+          {/* Link de regreso */}
+          <TouchableOpacity
+            style={styles.backToLoginContainer}
+            onPress={() => router.back()}
+            disabled={loading}
+          >
+            <Ionicons name="arrow-back-circle-outline" size={16} color="#4CAF50" />
+            <Text style={styles.backToLoginText}>Volver al inicio de sesión</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  containerDark: {
+    backgroundColor: '#121212',
   },
   scrollContent: {
     flexGrow: 1,
+    padding: 20,
+    paddingTop: 60,
   },
-  header: {
-    paddingTop: 80,
-    paddingBottom: 60,
-    paddingHorizontal: Spacing.lg,
-    alignItems: 'center',
-    borderBottomLeftRadius: 40,
-    borderBottomRightRadius: 40,
+  headerContainer: {
+    marginBottom: 20,
   },
   backButton: {
-    position: 'absolute',
-    top: 60,
-    left: Spacing.lg,
-    zIndex: 10,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 40,
   },
   iconContainer: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: '#E8F5E9',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: Spacing.lg,
+    marginBottom: 20,
+  },
+  iconContainerDark: {
+    backgroundColor: '#1a3a1a',
   },
   title: {
-    fontSize: FontSizes.xxxl,
+    fontSize: 28,
     fontWeight: 'bold',
-    color: '#FFF',
-    marginBottom: Spacing.xs,
+    color: '#333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  titleDark: {
+    color: '#fff',
   },
   subtitle: {
-    fontSize: FontSizes.md,
-    color: 'rgba(255,255,255,0.9)',
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    paddingHorizontal: 20,
   },
-  formContainer: {
-    flex: 1,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.xxl,
+  subtitleDark: {
+    color: '#999',
   },
-  card: {
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.xl,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 5,
+  form: {
+    width: '100%',
   },
   description: {
-    fontSize: FontSizes.md,
+    fontSize: 14,
+    color: '#666',
     textAlign: 'center',
-    marginBottom: Spacing.xl,
-    lineHeight: 22,
+    marginBottom: 30,
+    lineHeight: 20,
+  },
+  descriptionDark: {
+    color: '#999',
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-    paddingVertical: Spacing.md,
-    marginBottom: Spacing.lg,
-    gap: Spacing.sm,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingHorizontal: 15,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    height: 55,
+  },
+  inputContainerDark: {
+    backgroundColor: '#1e1e1e',
+    borderColor: '#333',
+  },
+  inputIcon: {
+    marginRight: 10,
   },
   input: {
     flex: 1,
-    fontSize: FontSizes.md,
+    fontSize: 16,
+    color: '#333',
+  },
+  inputDark: {
+    color: '#fff',
   },
   button: {
+    backgroundColor: '#4CAF50',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 15,
+    borderRadius: 10,
+    marginTop: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  buttonDisabled: {
+    backgroundColor: '#A5D6A7',
+  },
+  buttonIcon: {
+    marginRight: 8,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  backToLoginContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.lg,
-    borderRadius: BorderRadius.lg,
-    marginTop: Spacing.md,
+    marginTop: 20,
+    gap: 6,
   },
-  buttonText: {
-    fontSize: FontSizes.md,
+  backToLoginText: {
+    fontSize: 14,
+    color: '#4CAF50',
     fontWeight: '600',
-    color: '#FFF',
   },
 });

@@ -1,129 +1,69 @@
-import { FloatingButton } from '@/components/map/FloatingButton';
-import { BaseColors, BorderRadius, FontSizes, Spacing } from '@/constants/theme';
-import { useThemeColor } from '@/hooks/useThemeColor';
-import * as Haptics from 'expo-haptics';
-import * as Location from 'expo-location';
+import MonitoringMap from '@/components/MonitoringMap';
+import { getAllMatrices } from '@/constants/monitoring';
+import { useRoutes } from '@/hooks/useRoutes';
+import { MonitoringPoint } from '@/types/route.types';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import React, { useMemo, useRef, useState } from 'react';
 import {
-    ChevronDown,
-    Crosshair,
-    Layers,
-    List,
-    MapPin,
-    Navigation as NavigationIcon,
-    Route,
-    X,
-} from 'lucide-react-native';
-import React, { useEffect, useRef, useState } from 'react';
-import {
-    ActivityIndicator,
-    Animated,
-    Dimensions,
-    FlatList,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Animated,
+  Dimensions,
+  FlatList,
+  Platform,
+  Pressable,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  useColorScheme,
+  View,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-const mockPoints = [
-  { id: '1', name: 'Centro Comercial Plaza Norte', lat: -12.0464, lng: -77.0428, status: 'completed', address: 'Av. Alfredo Mendiola 1400' },
-  { id: '2', name: 'Parque Kennedy', lat: -12.0474, lng: -77.0438, status: 'completed', address: 'Miraflores, Lima' },
-  { id: '3', name: 'Municipalidad de San Isidro', lat: -12.0484, lng: -77.0448, status: 'completed', address: 'Av. Rivera Navarrete 740' },
-  { id: '4', name: 'Mall del Sur', lat: -12.0494, lng: -77.0458, status: 'next', number: 4, address: 'Av. Caminos del Inca 1385' },
-  { id: '5', name: 'Jockey Plaza', lat: -12.0504, lng: -77.0468, status: 'pending', number: 5, address: 'Av. Javier Prado Este 4200' },
-  { id: '6', name: 'Real Plaza Salaverry', lat: -12.0514, lng: -77.0478, status: 'pending', number: 6, address: 'Av. Salaverry 2370' },
-];
+const PANEL_HEIGHT = SCREEN_HEIGHT * 0.75;
 
 export default function MapScreen() {
-  const { colors, isDark, shadow } = useThemeColor();
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [selectedPoint, setSelectedPoint] = useState<any>(null);
-  const [showPoints, setShowPoints] = useState(true);
-  const [mapLoaded, setMapLoaded] = useState(false);
-  const webViewRef = useRef<WebView>(null);
-  const locationSubscription = useRef<Location.LocationSubscription | null>(null);
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const { routes } = useRoutes();
+  const [selectedMatrix, setSelectedMatrix] = useState<string | null>(null);
+  const [isPanelOpen, setIsPanelOpen] = useState(false);
+  const [isLegendVisible, setIsLegendVisible] = useState(false);
   
-  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-  const opacityAnim = useRef(new Animated.Value(0)).current;
+  const panelAnimation = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => {
-    getCurrentLocation();
-    startLocationTracking();
-    
-    return () => {
-      if (locationSubscription.current) {
-        locationSubscription.current.remove();
-      }
-    };
-  }, []);
+  const allPoints: MonitoringPoint[] = useMemo(() => {
+    return routes.flatMap(route => route.monitoringPoints || []);
+  }, [routes]);
 
-  const getCurrentLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+  const filteredPoints = useMemo(() => {
+    return selectedMatrix
+      ? allPoints.filter(point => point.matrix === selectedMatrix)
+      : allPoints;
+  }, [allPoints, selectedMatrix]);
 
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-      setLocation(loc);
-    } catch (error) {
-      console.error('Error obteniendo ubicación:', error);
-    }
-  };
+  const matrixCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allPoints.forEach(point => {
+      counts[point.matrix] = (counts[point.matrix] || 0) + 1;
+    });
+    return counts;
+  }, [allPoints]);
 
-  const startLocationTracking = async () => {
-    try {
-      const { status } = await Location.getForegroundPermissionsAsync();
-      if (status.granted !== true) return;
+  const matrices = getAllMatrices();
 
-      locationSubscription.current = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 3000,
-          distanceInterval: 5,
-        },
-        (newLocation) => {
-          setLocation(newLocation);
-          
-          if (webViewRef.current) {
-            webViewRef.current.postMessage(JSON.stringify({
-              action: 'updateUserLocation',
-              lat: newLocation.coords.latitude,
-              lng: newLocation.coords.longitude,
-            }));
-          }
-        }
-      );
-    } catch (error) {
-      console.error('Error iniciando tracking:', error);
-    }
-  };
-
-  const centerOnUserLocation = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (location && webViewRef.current) {
-      webViewRef.current.postMessage(JSON.stringify({
-        action: 'centerUser',
-        lat: location.coords.latitude,
-        lng: location.coords.longitude,
-      }));
-    }
-  };
-
-  const openPointsList = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
+  const openPanel = () => {
+    setIsPanelOpen(true);
+    setIsLegendVisible(false);
     Animated.parallel([
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 300,
+      Animated.spring(panelAnimation, {
+        toValue: SCREEN_HEIGHT - PANEL_HEIGHT,
         useNativeDriver: true,
+        tension: 65,
+        friction: 11,
       }),
-      Animated.timing(opacityAnim, {
+      Animated.timing(overlayOpacity, {
         toValue: 1,
         duration: 300,
         useNativeDriver: true,
@@ -131,473 +71,267 @@ export default function MapScreen() {
     ]).start();
   };
 
-  const closePointsList = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
+  const closePanel = () => {
     Animated.parallel([
-      Animated.timing(slideAnim, {
+      Animated.spring(panelAnimation, {
         toValue: SCREEN_HEIGHT,
-        duration: 250,
         useNativeDriver: true,
+        tension: 65,
+        friction: 11,
       }),
-      Animated.timing(opacityAnim, {
+      Animated.timing(overlayOpacity, {
         toValue: 0,
         duration: 250,
         useNativeDriver: true,
       }),
-    ]).start();
+    ]).start(() => setIsPanelOpen(false));
   };
 
-  const centerOnPoint = (point: any) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (webViewRef.current) {
-      webViewRef.current.postMessage(JSON.stringify({
-        action: 'centerPoint',
-        lat: point.lat,
-        lng: point.lng,
-      }));
-    }
-    setSelectedPoint(point);
-    closePointsList();
+  const handleMatrixSelect = (matrixId: string | null) => {
+    setSelectedMatrix(matrixId);
+    closePanel();
   };
 
-  const togglePointsVisibility = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setShowPoints(!showPoints);
-    if (webViewRef.current) {
-      webViewRef.current.postMessage(JSON.stringify({
-        action: 'togglePoints',
-        show: !showPoints,
-      }));
-    }
-  };
+  const selectedMatrixData = selectedMatrix 
+    ? matrices.find(m => m.id === selectedMatrix)
+    : null;
 
-  const handleMessage = (event: any) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
-      
-      if (data.action === 'markerClick') {
-        const point = mockPoints.find(p => p.id === data.pointId);
-        if (point) {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          setSelectedPoint(point);
-        }
-      } else if (data.action === 'mapLoaded') {
-        setMapLoaded(true);
-      }
-    } catch (error) {
-      console.error('Error parsing message:', error);
-    }
-  };
+  const listData = [
+    { type: 'all', key: 'all' },
+    { type: 'divider', key: 'divider' },
+    ...matrices.filter(m => (matrixCounts[m.id] || 0) > 0).map(m => ({ type: 'matrix', key: m.id, data: m })),
+    { type: 'stats', key: 'stats' },
+  ];
 
-  const closeBottomSheet = () => {
-    setSelectedPoint(null);
-  };
-
-  const navigateToPoint = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    console.log('Navegando a:', selectedPoint?.name);
-  };
-
-  const traceRoute = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    console.log('Trazando ruta a:', selectedPoint?.name);
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed': return BaseColors.pointCompleted;
-      case 'next': return BaseColors.pointNext;
-      case 'pending': return BaseColors.pointPending;
-      default: return BaseColors.pointInactive;
-    }
-  };
-
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'completed': return 'Completado';
-      case 'next': return 'Siguiente';
-      case 'pending': return 'Pendiente';
-      default: return 'Inactivo';
-    }
-  };
-
-  const mapTileUrl = isDark 
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-
-  const mapHTML = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-          margin: 0; 
-          padding: 0; 
-          background: ${isDark ? '#0A0A0A' : '#FFFFFF'}; 
-          overflow: hidden;
-        }
-        #map { width: 100vw; height: 100vh; }
-        .leaflet-container {
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 14px;
-        }
-        .pulse-marker {
-          width: 80px;
-          height: 80px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .pulse-dot {
-          width: 14px;
-          height: 14px;
-          background: #1AA34A;
-          border-radius: 50%;
-          border: 3px solid white;
-          position: relative;
-          z-index: 10;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        }
-        .pulse-wave {
-          position: absolute;
-          width: 24px;
-          height: 24px;
-          background: #1DB954;
-          border-radius: 50%;
-          opacity: 0;
-          animation: pulse 2s infinite;
-        }
-        .pulse-wave:nth-child(2) { animation-delay: 0.6s; }
-        .pulse-wave:nth-child(3) { animation-delay: 1.2s; }
-        @keyframes pulse {
-          0% { transform: scale(1); opacity: 0.6; }
-          100% { transform: scale(3.5); opacity: 0; }
-        }
-        .point-marker {
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          border: 3px solid white;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-weight: bold;
-          font-size: 16px;
-          color: white;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-          transition: transform 0.2s;
-          cursor: pointer;
-        }
-        .point-marker:active { transform: scale(1.1); }
-        .point-completed { background: #10B981; }
-        .point-next { 
-          background: #F59E0B;
-          animation: nextPulse 2s infinite;
-        }
-        .point-pending { background: #3B82F6; }
-        @keyframes nextPulse {
-          0%, 100% { transform: scale(1); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-          50% { transform: scale(1.15); box-shadow: 0 6px 16px rgba(245, 158, 11, 0.5); }
-        }
-      </style>
-    </head>
-    <body>
-      <div id="map"></div>
-      <script>
-        const userLat = ${location?.coords.latitude || -12.0464};
-        const userLng = ${location?.coords.longitude || -77.0428};
-        const points = ${JSON.stringify(mockPoints)};
-        
-        const map = L.map('map', {
-          zoomControl: false,
-          attributionControl: false,
-          maxZoom: 19,
-          minZoom: 10,
-        }).setView([userLat, userLng], 15);
-        
-        L.tileLayer('${mapTileUrl}', {
-          maxZoom: 19,
-          subdomains: 'abcd',
-        }).addTo(map);
-        
-        const userIcon = L.divIcon({
-          className: 'pulse-marker',
-          html: '<div class="pulse-wave"></div><div class="pulse-wave"></div><div class="pulse-wave"></div><div class="pulse-dot"></div>',
-          iconSize: [80, 80],
-        });
-        
-        const userMarker = L.marker([userLat, userLng], { 
-          icon: userIcon,
-          zIndexOffset: 1000
-        }).addTo(map);
-        
-        const pointMarkers = [];
-        points.forEach(point => {
-          const statusClass = 'point-' + point.status;
-          const content = point.number ? point.number : '✓';
-          
-          const pointIcon = L.divIcon({
-            className: '',
-            html: '<div class="point-marker ' + statusClass + '">' + content + '</div>',
-            iconSize: [40, 40],
-            iconAnchor: [20, 20],
-          });
-          
-          const marker = L.marker([point.lat, point.lng], { 
-            icon: pointIcon,
-            riseOnHover: true
-          })
-            .addTo(map)
-            .on('click', function() {
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                action: 'markerClick',
-                pointId: point.id
-              }));
-            });
-          
-          pointMarkers.push({ marker, id: point.id });
-        });
-        
-        window.addEventListener('message', (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            
-            if (data.action === 'centerUser') {
-              map.flyTo([data.lat, data.lng], 16, { duration: 1, easeLinearity: 0.25 });
-              userMarker.setLatLng([data.lat, data.lng]);
-            } else if (data.action === 'centerPoint') {
-              map.flyTo([data.lat, data.lng], 17, { duration: 1, easeLinearity: 0.25 });
-            } else if (data.action === 'updateUserLocation') {
-              userMarker.setLatLng([data.lat, data.lng]);
-            } else if (data.action === 'togglePoints') {
-              pointMarkers.forEach(({ marker }) => {
-                if (data.show) {
-                  marker.addTo(map);
-                } else {
-                  marker.remove();
-                }
-              });
-            }
-          } catch (error) {
-            console.error('Error:', error);
-          }
-        });
-        
-        setTimeout(() => {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            action: 'mapLoaded'
-          }));
-        }, 500);
-      </script>
-    </body>
-    </html>
-  `;
-
-  const isModalOpen = slideAnim._value < SCREEN_HEIGHT;
-
-  return (
-    <View style={[styles.container, { backgroundColor: colors.bgPrimary }]}>
-      <StatusBar 
-        barStyle="dark-content" 
-        backgroundColor="transparent"
-        translucent
-      />
-      
-      <View style={[styles.header, { backgroundColor: colors.cardBg }, shadow.md]}>
-        <TouchableOpacity 
-          style={styles.headerButton}
-          onPress={openPointsList}
+  const renderItem = ({ item }: any) => {
+    if (item.type === 'all') {
+      return (
+        <TouchableOpacity
+          style={[styles.matrixCard, isDark && styles.matrixCardDark, selectedMatrix === null && styles.matrixCardActive]}
+          onPress={() => handleMatrixSelect(null)}
+          activeOpacity={0.7}
         >
-          <View style={styles.headerLeft}>
-            <MapPin size={20} color={BaseColors.primary} />
-            <View style={styles.headerTextContainer}>
-              <Text style={[styles.headerTitle, { color: colors.textPrimary }]} numberOfLines={1}>
-                {selectedPoint ? selectedPoint.name : 'Puntos de Monitoreo'}
+          <View style={styles.matrixCardLeft}>
+            <View style={[styles.matrixIconCircle, selectedMatrix === null && styles.matrixIconCircleActive]}>
+              <Ionicons name="grid" size={22} color={selectedMatrix === null ? '#fff' : '#4CAF50'} />
+            </View>
+            <View style={styles.matrixInfo}>
+              <Text style={[styles.matrixName, isDark && styles.textDark, selectedMatrix === null && styles.matrixNameActive]}>
+                Todas las matrices
               </Text>
-              <Text style={[styles.headerSubtitle, { color: colors.textSecondary }]}>
-                {showPoints ? `${mockPoints.length} puntos visibles` : 'Puntos ocultos'}
+              <Text style={[styles.matrixDescription, isDark && styles.textSecondaryDark, selectedMatrix === null && styles.matrixDescriptionActive]}>
+                Ver todos los puntos de monitoreo
               </Text>
             </View>
           </View>
-          <ChevronDown 
-            size={20} 
-            color={colors.textTertiary}
+          <View style={[styles.countBadge, selectedMatrix === null && styles.countBadgeActive]}>
+            <Text style={[styles.countText, selectedMatrix === null && styles.countTextActive]}>
+              {allPoints.length}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      );
+    }
+
+    if (item.type === 'divider') {
+      return (
+        <View style={styles.divider}>
+          <View style={[styles.dividerLine, isDark && styles.dividerLineDark]} />
+          <Text style={[styles.dividerText, isDark && styles.textSecondaryDark]}>POR TIPO DE MATRIZ</Text>
+          <View style={[styles.dividerLine, isDark && styles.dividerLineDark]} />
+        </View>
+      );
+    }
+
+    if (item.type === 'matrix') {
+      const matrix = item.data;
+      const count = matrixCounts[matrix.id] || 0;
+      const isSelected = selectedMatrix === matrix.id;
+
+      return (
+        <TouchableOpacity
+          style={[styles.matrixCard, isDark && styles.matrixCardDark, isSelected && styles.matrixCardActive, isSelected && { backgroundColor: matrix.color }]}
+          onPress={() => handleMatrixSelect(matrix.id)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.matrixCardLeft}>
+            <View style={[styles.matrixIconCircle, !isSelected && { backgroundColor: matrix.lightBackground }, isSelected && styles.matrixIconCircleActive]}>
+              <Ionicons name={matrix.icon} size={22} color={isSelected ? '#fff' : matrix.color} />
+            </View>
+            <View style={styles.matrixInfo}>
+              <Text style={[styles.matrixName, isDark && styles.textDark, isSelected && styles.matrixNameActive]}>
+                {matrix.name}
+              </Text>
+              <Text style={[styles.matrixDescription, isDark && styles.textSecondaryDark, isSelected && styles.matrixDescriptionActive]}>
+                {matrix.description}
+              </Text>
+            </View>
+          </View>
+          <View style={[styles.countBadge, isSelected && styles.countBadgeActive]}>
+            <Text style={[styles.countText, isSelected && styles.countTextActive]}>{count}</Text>
+          </View>
+        </TouchableOpacity>
+      );
+    }
+
+    if (item.type === 'stats') {
+      return (
+        <View style={styles.statsSection}>
+          <Text style={[styles.statsTitle, isDark && styles.textDark]}>Resumen</Text>
+          <View style={styles.statsGrid}>
+            <View style={[styles.statCard, isDark && styles.statCardDark]}>
+              <View style={[styles.statIconCircle, { backgroundColor: '#E8F5E9' }]}>
+                <Ionicons name="checkmark-circle" size={22} color="#4CAF50" />
+              </View>
+              <Text style={[styles.statNumber, isDark && styles.textDark]}>
+                {allPoints.filter(p => p.status === 'completed').length}
+              </Text>
+              <Text style={[styles.statLabel, isDark && styles.textSecondaryDark]}>Completados</Text>
+            </View>
+            <View style={[styles.statCard, isDark && styles.statCardDark]}>
+              <View style={[styles.statIconCircle, { backgroundColor: '#FFF3E0' }]}>
+                <Ionicons name="time" size={22} color="#FF9800" />
+              </View>
+              <Text style={[styles.statNumber, isDark && styles.textDark]}>
+                {allPoints.filter(p => p.status === 'pending').length}
+              </Text>
+              <Text style={[styles.statLabel, isDark && styles.textSecondaryDark]}>Pendientes</Text>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+
+      {/* Mapa en pantalla completa */}
+      <View style={styles.mapContainer}>
+        {filteredPoints.length > 0 ? (
+          <MonitoringMap
+            points={filteredPoints}
+            showRoute={false}
+            showLegend={false}
+            onPointPress={(point) => {
+              const route = routes.find(r => 
+                r.monitoringPoints?.some(p => p.id === point.id)
+              );
+              if (route) {
+                router.push(`/route-detail/${route.id}`);
+              }
+            }}
           />
+        ) : (
+          <View style={styles.emptyMap}>
+            <Ionicons name="map-outline" size={64} color="#666" />
+            <Text style={styles.emptyText}>No hay puntos de monitoreo</Text>
+          </View>
+        )}
+      </View>
+
+      {/* Barra flotante estilo Google Maps */}
+      <View style={styles.searchBarWrapper}>
+        <TouchableOpacity 
+          style={[styles.searchBar, isDark && styles.searchBarDark]}
+          onPress={openPanel}
+          activeOpacity={0.9}
+        >
+          <Ionicons name="location" size={22} color="#4CAF50" />
+          <View style={styles.searchBarContent}>
+            <Text style={[styles.searchBarTitle, isDark && styles.textDark]}>
+              {selectedMatrixData ? selectedMatrixData.name : 'Puntos de Monitoreo'}
+            </Text>
+            <Text style={[styles.searchBarSubtitle, isDark && styles.textSecondaryDark]}>
+              {filteredPoints.length} puntos visibles
+            </Text>
+          </View>
+          <Ionicons name="chevron-down" size={18} color={isDark ? '#999' : '#666'} />
         </TouchableOpacity>
       </View>
 
-      <WebView
-        ref={webViewRef}
-        source={{ html: mapHTML }}
-        style={styles.map}
-        onMessage={handleMessage}
-        javaScriptEnabled={true}
-        domStorageEnabled={true}
-      />
+      {/* BOTÓN DE LEYENDA - ESTILO NATIVO BLANCO */}
+      {!isPanelOpen && (
+        <TouchableOpacity 
+          style={[styles.legendButton, isLegendVisible && styles.legendButtonActive]}
+          onPress={() => setIsLegendVisible(!isLegendVisible)}
+          activeOpacity={0.7}
+        >
+          <Ionicons 
+            name={isLegendVisible ? "information-circle" : "information-circle-outline"}
+            size={26} 
+            color={isLegendVisible ? '#4CAF50' : '#666'} 
+          />
+        </TouchableOpacity>
+      )}
 
-      {!mapLoaded && (
-        <View style={[styles.loadingContainer, { backgroundColor: colors.bgSecondary }]}>
-          <ActivityIndicator size="large" color={BaseColors.primary} />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Cargando mapa...</Text>
+      {/* LEYENDA - ESQUINA INFERIOR IZQUIERDA */}
+      {!isPanelOpen && isLegendVisible && (
+        <View style={[styles.legend, isDark && styles.legendDark]}>
+          <View style={styles.legendHeader}>
+            <Ionicons name="layers" size={16} color={isDark ? '#fff' : '#333'} />
+            <Text style={[styles.legendTitle, isDark && styles.textDark]}>Matrices</Text>
+          </View>
+          {matrices.map((config, idx) => (
+            <View key={`legend-${idx}`} style={styles.legendItem}>
+              <View style={[styles.legendIcon, { backgroundColor: config.color }]}>
+                <Ionicons name={config.icon} size={14} color="#fff" />
+              </View>
+              <Text style={[styles.legendText, isDark && styles.textDark]}>{config.name}</Text>
+            </View>
+          ))}
         </View>
       )}
 
-      <View style={styles.floatingButtons}>
-        <FloatingButton
-          icon={<Crosshair size={20} color={BaseColors.primary} />}
-          onPress={centerOnUserLocation}
-        />
-        <FloatingButton
-          icon={<List size={20} color={showPoints ? BaseColors.primary : colors.textSecondary} />}
-          onPress={togglePointsVisibility}
-          active={showPoints}
-        />
-        <FloatingButton
-          icon={<Layers size={20} color={colors.textSecondary} />}
-          onPress={() => console.log('Capas')}
-        />
-      </View>
+      {/* Overlay con opacidad */}
+      {isPanelOpen && (
+        <Animated.View
+          style={[styles.overlay, { opacity: overlayOpacity.interpolate({ inputRange: [0, 1], outputRange: [0, 0.7] }) }]}
+        >
+          <Pressable style={StyleSheet.absoluteFill} onPress={closePanel} />
+        </Animated.View>
+      )}
 
-      <Animated.View 
-        style={[
-          styles.modalOverlay,
-          { 
-            opacity: opacityAnim,
-            pointerEvents: isModalOpen ? 'auto' : 'none',
-          }
-        ]}
-        pointerEvents="box-none"
-      >
-        <TouchableOpacity 
-          style={StyleSheet.absoluteFill}
-          activeOpacity={1}
-          onPress={closePointsList}
-        />
-      </Animated.View>
+      {/* Panel inferior deslizable */}
+      <Animated.View style={[styles.panel, isDark && styles.panelDark, { transform: [{ translateY: panelAnimation }] }]}>
+        <TouchableOpacity style={styles.handleContainer} onPress={closePanel} activeOpacity={0.7}>
+          <View style={[styles.handle, isDark && styles.handleDark]} />
+        </TouchableOpacity>
 
-      <Animated.View
-        style={[
-          styles.pointsListContainer,
-          { 
-            backgroundColor: colors.cardBg,
-            transform: [{ translateY: slideAnim }],
-          },
-          shadow.lg,
-        ]}
-      >
-        <View style={[styles.modalHandle, { backgroundColor: colors.bgTertiary }]} />
-        
-        <View style={styles.modalHeader}>
-          <Text style={[styles.modalTitle, { color: colors.textPrimary }]}>
-            Puntos de Monitoreo
-          </Text>
-          <TouchableOpacity onPress={closePointsList} style={styles.closeButton}>
-            <X size={24} color={colors.textSecondary} />
+        <View style={[styles.panelHeader, isDark && styles.panelHeaderDark]}>
+          <View style={styles.panelHeaderLeft}>
+            <View style={styles.headerIconCircle}>
+              <Ionicons name="filter" size={20} color="#4CAF50" />
+            </View>
+            <View>
+              <Text style={[styles.panelTitle, isDark && styles.textDark]}>Filtrar Puntos</Text>
+              <Text style={[styles.panelSubtitle, isDark && styles.textSecondaryDark]}>
+                Selecciona una matriz de monitoreo
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity onPress={closePanel} style={[styles.closeButton, isDark && styles.closeButtonDark]}>
+            <Ionicons name="close" size={20} color={isDark ? '#fff' : '#000'} />
           </TouchableOpacity>
         </View>
 
         <FlatList
-          data={mockPoints}
-          keyExtractor={(item) => item.id}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.pointItem, { borderBottomColor: colors.borderColor }]}
-              onPress={() => centerOnPoint(item)}
-            >
-              <View style={styles.pointItemLeft}>
-                <View style={[styles.pointItemBadge, { backgroundColor: getStatusColor(item.status) }]}>
-                  <Text style={styles.pointItemBadgeText}>{item.number || '✓'}</Text>
-                </View>
-                <View style={styles.pointItemInfo}>
-                  <Text style={[styles.pointItemName, { color: colors.textPrimary }]}>{item.name}</Text>
-                  <Text style={[styles.pointItemAddress, { color: colors.textSecondary }]}>{item.address}</Text>
-                  <Text style={[styles.pointItemStatus, { color: getStatusColor(item.status) }]}>
-                    {getStatusLabel(item.status)}
-                  </Text>
-                </View>
-              </View>
-              <NavigationIcon size={20} color={colors.textTertiary} />
-            </TouchableOpacity>
-          )}
+          data={listData}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.key}
+          contentContainerStyle={styles.panelContent}
+          showsVerticalScrollIndicator={true}
+          indicatorStyle={isDark ? 'white' : 'black'}
+          bounces={true}
+          removeClippedSubviews={false}
+          maxToRenderPerBatch={10}
+          windowSize={10}
+          scrollIndicatorInsets={{ right: 1 }}
         />
       </Animated.View>
-
-      {selectedPoint && (
-        <>
-          <TouchableOpacity 
-            style={styles.overlay} 
-            activeOpacity={1}
-            onPress={closeBottomSheet}
-          />
-          
-          <View style={[styles.bottomSheet, { backgroundColor: colors.cardBg }, shadow.lg]}>
-            <View style={[styles.bottomSheetHandle, { backgroundColor: colors.bgTertiary }]} />
-            
-            <View style={styles.bottomSheetContent}>
-              <View style={styles.pointHeader}>
-                <View style={[
-                  styles.pointBadge,
-                  { backgroundColor: getStatusColor(selectedPoint.status) }
-                ]}>
-                  <Text style={styles.pointBadgeText}>
-                    {selectedPoint.number || '✓'}
-                  </Text>
-                </View>
-                <View style={styles.pointInfo}>
-                  <Text style={[styles.pointName, { color: colors.textPrimary }]}>{selectedPoint.name}</Text>
-                  <Text style={[styles.pointAddress, { color: colors.textSecondary }]}>{selectedPoint.address}</Text>
-                  <View style={styles.statusBadge}>
-                    <View style={[styles.statusDot, { backgroundColor: getStatusColor(selectedPoint.status) }]} />
-                    <Text style={[styles.pointStatus, { color: colors.textSecondary }]}>
-                      {getStatusLabel(selectedPoint.status)}
-                    </Text>
-                  </View>
-                </View>
-                <TouchableOpacity onPress={closeBottomSheet}>
-                  <X size={24} color={colors.textSecondary} />
-                </TouchableOpacity>
-              </View>
-
-              <View style={[styles.pointDetails, { backgroundColor: colors.bgSecondary }]}>
-                <View style={styles.detailRow}>
-                  <NavigationIcon size={16} color={colors.textSecondary} />
-                  <Text style={[styles.detailText, { color: colors.textSecondary }]}>2.3 km de distancia</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={[styles.detailText, { color: colors.textSecondary }]}>Tiempo estimado: 8 min</Text>
-                </View>
-              </View>
-
-              {selectedPoint.status !== 'completed' && (
-                <View style={styles.actionButtons}>
-                  <TouchableOpacity 
-                    style={[styles.actionButton, { backgroundColor: BaseColors.primary }]}
-                    onPress={navigateToPoint}
-                  >
-                    <NavigationIcon size={20} color="#FFF" />
-                    <Text style={styles.actionButtonText}>Navegar</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity 
-                    style={[styles.actionButton, { backgroundColor: colors.bgTertiary }]}
-                    onPress={traceRoute}
-                  >
-                    <Route size={20} color={BaseColors.primary} />
-                    <Text style={[styles.actionButtonTextSecondary, { color: colors.textPrimary }]}>Trazar Ruta</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          </View>
-        </>
-      )}
     </View>
   );
 }
@@ -605,249 +339,353 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#000',
   },
-  map: {
+  mapContainer: {
     flex: 1,
   },
-  loadingContainer: {
+  emptyMap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 16,
+  },
+  searchBarWrapper: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    top: Platform.OS === 'ios' ? 60 : (StatusBar.currentHeight || 40) + 20,
+    left: 16,
+    right: 16,
+    zIndex: 5,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 28,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    gap: 12,
+  },
+  searchBarDark: {
+    backgroundColor: '#2c2c2e',
+  },
+  searchBarContent: {
+    flex: 1,
+  },
+  searchBarTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
+  },
+  searchBarSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
+  },
+legendButton: {
+  position: 'absolute',
+  bottom: Platform.OS === 'ios' ? 75 : 85,  // ← AÚN MÁS CERCA del botón nativo
+  right: 10,
+  width: 56,
+  height: 56,
+  borderRadius: 28,
+  backgroundColor: '#fff',
+  justifyContent: 'center',
+  alignItems: 'center',
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.25,
+  shadowRadius: 8,
+  elevation: 8,
+},
+legendButtonActive: {
+  backgroundColor: '#E8F5E9',
+},
+legend: {
+  position: 'absolute',
+  bottom: Platform.OS === 'ios' ? 20 : 30,  // ← MÁS ABAJO, cerca del TabBar
+  left: 16,
+  backgroundColor: 'rgba(255, 255, 255, 0.98)',
+  borderRadius: 16,
+  padding: 16,
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.25,
+  shadowRadius: 8,
+  elevation: 9,
+  minWidth: 150,
+  maxWidth: 200,
+},
+
+  legendDark: {
+    backgroundColor: 'rgba(28, 28, 30, 0.98)',
+  },
+  legendHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 8,
+  },
+  legendTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#333',
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 6,
+    gap: 10,
+  },
+  legendIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  loadingText: {
-    marginTop: Spacing.md,
-    fontSize: FontSizes.md,
+  legendText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
   },
-  header: {
-    position: 'absolute',
-    top: 60,
-    left: Spacing.lg,
-    right: Spacing.lg,
-    zIndex: 100,
-    borderRadius: BorderRadius.xl,
-    overflow: 'hidden',
+  textDark: {
+    color: '#fff',
   },
-  headerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: Spacing.md,
+  textSecondaryDark: {
+    color: '#999',
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    flex: 1,
-    marginRight: Spacing.sm,
-  },
-  headerTextContainer: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: FontSizes.md,
-    fontWeight: '700',
-  },
-  headerSubtitle: {
-    fontSize: FontSizes.xs,
-    marginTop: 2,
-  },
-  floatingButtons: {
-    position: 'absolute',
-    right: Spacing.lg,
-    bottom: 120,
-    gap: Spacing.sm,
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000',
     zIndex: 10,
   },
-  modalOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    zIndex: 50,
-  },
-  pointsListContainer: {
+  panel: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
-    height: SCREEN_HEIGHT * 0.75,
-    borderTopLeftRadius: BorderRadius.xl,
-    borderTopRightRadius: BorderRadius.xl,
-    paddingTop: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    zIndex: 60,
+    bottom: 0,
+    height: SCREEN_HEIGHT,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    zIndex: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 20,
   },
-  modalHandle: {
-    width: 40,
+  panelDark: {
+    backgroundColor: '#1c1c1e',
+  },
+  handleContainer: {
+    alignItems: 'center',
+    paddingTop: 10,
+    paddingBottom: 8,
+  },
+  handle: {
+    width: 36,
     height: 4,
     borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: Spacing.md,
+    backgroundColor: '#d0d0d0',
   },
-  modalHeader: {
+  handleDark: {
+    backgroundColor: '#3a3a3c',
+  },
+  panelHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: Spacing.lg,
-  },
-  modalTitle: {
-    fontSize: FontSizes.xl,
-    fontWeight: 'bold',
-  },
-  closeButton: {
-    padding: Spacing.xs,
-  },
-  listContent: {
-    paddingBottom: Spacing.xxl,
-  },
-  pointItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.md,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,0,0,0.08)',
   },
-  pointItemLeft: {
+  panelHeaderDark: {
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  panelHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.md,
+    gap: 12,
     flex: 1,
   },
-  pointItemBadge: {
+  headerIconCircle: {
     width: 40,
     height: 40,
     borderRadius: 20,
+    backgroundColor: '#E8F5E9',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  pointItemBadgeText: {
-    fontSize: FontSizes.md,
-    fontWeight: 'bold',
-    color: '#FFF',
-  },
-  pointItemInfo: {
-    flex: 1,
-  },
-  pointItemName: {
-    fontSize: FontSizes.md,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  pointItemAddress: {
-    fontSize: FontSizes.xs,
-    marginBottom: 4,
-  },
-  pointItemStatus: {
-    fontSize: FontSizes.xs,
-    fontWeight: '600',
-  },
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    zIndex: 20,
-  },
-  bottomSheet: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    borderTopLeftRadius: BorderRadius.xl,
-    borderTopRightRadius: BorderRadius.xl,
-    padding: Spacing.lg,
-    zIndex: 30,
-  },
-  bottomSheetHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: Spacing.md,
-  },
-  bottomSheetContent: {
-    gap: Spacing.md,
-  },
-  pointHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.md,
-  },
-  pointBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pointBadgeText: {
-    fontSize: FontSizes.xl,
-    fontWeight: 'bold',
-    color: '#FFF',
-  },
-  pointInfo: {
-    flex: 1,
-  },
-  pointName: {
-    fontSize: FontSizes.lg,
+  panelTitle: {
+    fontSize: 17,
     fontWeight: '700',
-    marginBottom: 4,
+    color: '#000',
   },
-  pointAddress: {
-    fontSize: FontSizes.sm,
-    marginBottom: 6,
+  panelSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 2,
   },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  pointStatus: {
-    fontSize: FontSizes.sm,
-    fontWeight: '600',
-  },
-  pointDetails: {
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    gap: Spacing.sm,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-  },
-  detailText: {
-    fontSize: FontSizes.sm,
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.05)',
     justifyContent: 'center',
-    gap: Spacing.sm,
-    padding: Spacing.md,
-    borderRadius: BorderRadius.lg,
+    alignItems: 'center',
   },
-  actionButtonText: {
-    fontSize: FontSizes.md,
-    fontWeight: '600',
-    color: '#FFF',
+  closeButtonDark: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
-  actionButtonTextSecondary: {
-    fontSize: FontSizes.md,
+  panelContent: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 250,
+  },
+  matrixCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+  },
+  matrixCardDark: {
+    backgroundColor: '#2c2c2e',
+  },
+  matrixCardActive: {
+    backgroundColor: '#4CAF50',
+  },
+  matrixCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  matrixIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#E8F5E9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  matrixIconCircleActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  matrixInfo: {
+    flex: 1,
+  },
+  matrixName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 3,
+  },
+  matrixNameActive: {
+    color: '#fff',
+  },
+  matrixDescription: {
+    fontSize: 12,
+    color: '#666',
+  },
+  matrixDescriptionActive: {
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  countBadge: {
+    minWidth: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
+  countBadgeActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  countText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#4CAF50',
+  },
+  countTextActive: {
+    color: '#fff',
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+    gap: 10,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#e0e0e0',
+  },
+  dividerLineDark: {
+    backgroundColor: '#3a3a3c',
+  },
+  dividerText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#999',
+    letterSpacing: 1,
+  },
+  statsSection: {
+    marginTop: 20,
+  },
+  statsTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 14,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 14,
+    padding: 16,
+    alignItems: 'center',
+  },
+  statCardDark: {
+    backgroundColor: '#2c2c2e',
+  },
+  statIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  statNumber: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#000',
+    marginBottom: 3,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#666',
     fontWeight: '600',
   },
 });

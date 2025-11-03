@@ -1,54 +1,49 @@
-import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { AuthProvider } from '@/contexts/AuthContext';
+import { useFonts } from 'expo-font';
+import { Stack } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import 'react-native-reanimated';
 
-function RootLayoutNav() {
-  const { user, loading } = useAuth();
-  const segments = useSegments();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (loading) {
-      console.log('⏳ Cargando estado de autenticación...');
-      return;
-    }
-
-    const inAuthGroup = segments[0] === '(auth)';
-
-    console.log('🔄 Verificando navegación...');
-    console.log('Usuario autenticado:', user ? user.email : 'No');
-    console.log('Segmentos actuales:', segments);
-    console.log('En grupo auth:', inAuthGroup);
-
-    if (user && !loading) {
-      console.log('✅ Usuario autenticado, redirigiendo a (tabs)');
-      if (inAuthGroup) {
-        router.replace('/(tabs)');
-      }
-    } else if (!user && !loading) {
-      console.log('❌ Usuario no autenticado, redirigiendo a (auth)');
-      if (!inAuthGroup) {
-        router.replace('/(auth)');
-      }
-    }
-  }, [user, loading, segments]);
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' }}>
-        <ActivityIndicator size="large" color="#4CAF50" />
-      </View>
-    );
-  }
-
-  return <Slot />;
-}
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+  const [loaded] = useFonts({
+    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+  });
+
+  useEffect(() => {
+    if (loaded) {
+      SplashScreen.hideAsync();
+    }
+  }, [loaded]);
+
+  if (!loaded) {
+    return null;
+  }
+
   return (
     <AuthProvider>
-      <RootLayoutNav />
+      <Stack screenOptions={{ headerShown: false }}>
+        {/* ✅ Pantalla inicial (splash/loading) */}
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        
+        {/* Grupo de autenticación */}
+        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+        
+        {/* Grupo de tabs */}
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        
+        {/* Detalle de ruta (modal) */}
+        <Stack.Screen 
+          name="route-detail/[id]" 
+          options={{ 
+            presentation: 'card',
+            headerShown: false,
+            animation: 'slide_from_right',
+          }} 
+        />
+      </Stack>
     </AuthProvider>
   );
 }
