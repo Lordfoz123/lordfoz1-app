@@ -1,5 +1,8 @@
 import { useAuth } from '@/contexts/AuthContext';
+import { useGPS } from '@/contexts/GPSContext';
+import { useRealTimeLocation } from '@/hooks/useRealTimeLocation';
 import { useRoutes } from '@/hooks/useRoutes';
+import { useWorkSchedule } from '@/hooks/useWorkSchedule';
 import { seedMonitoringRoutes } from '@/scripts/seedMonitoringRoutes';
 import { Ionicons } from '@expo/vector-icons';
 import * as Battery from 'expo-battery';
@@ -25,6 +28,24 @@ export default function HomeScreen() {
   const isDark = colorScheme === 'dark';
   const { user, userData } = useAuth();
   const { routes, loading, error, refresh } = useRoutes();
+  
+  // ✅ HOOKS PARA TRACKING - CONTEXTO GPS LIMPIO
+  const { 
+    isTracking, 
+    startTracking, 
+    stopTracking, 
+    isLoading, 
+    error: gpsError,
+    lastUpdate,
+    clearError,
+    currentUserId
+  } = useGPS();
+  
+  // 🛑 SOLUCIÓN DEL BUCLE: SOLO USAR LOCATION CUANDO TRACKING ESTÁ ACTIVO
+  const { currentLocation } = useRealTimeLocation(isTracking ? 'cymperu' : null);
+  
+  const { workStatus, isInWorkHours, currentSchedule, timeUntilNextChange } = useWorkSchedule('cymperu');
+  
   const [refreshing, setRefreshing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
@@ -32,6 +53,18 @@ export default function HomeScreen() {
 
   const scrollY = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // ✅ LIMPIAR ERRORES GPS AUTOMÁTICAMENTE
+  useEffect(() => {
+    if (gpsError) {
+      console.error('GPS Error:', gpsError);
+      const timer = setTimeout(() => {
+        clearError();
+      }, 5000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [gpsError, clearError]);
 
   // Actualizar hora cada minuto
   useEffect(() => {
@@ -42,7 +75,7 @@ export default function HomeScreen() {
     return () => clearInterval(timer);
   }, []);
 
-  // Obtener nivel de batería
+  // 🔋 OBTENER NIVEL DE BATERÍA
   useEffect(() => {
     const getBatteryInfo = async () => {
       try {
@@ -57,10 +90,8 @@ export default function HomeScreen() {
 
     getBatteryInfo();
 
-    // Actualizar cada 30 segundos
     const batteryInterval = setInterval(getBatteryInfo, 30000);
 
-    // Listener para cambios en tiempo real
     const subscription = Battery.addBatteryLevelListener(({ batteryLevel }) => {
       setBatteryLevel(Math.round(batteryLevel * 100));
     });
@@ -76,7 +107,7 @@ export default function HomeScreen() {
     };
   }, []);
 
-  // Animación de pulso para GPS
+  // 🎨 ANIMACIÓN DE PULSO MEJORADA
   useEffect(() => {
     const pulse = Animated.loop(
       Animated.sequence([
@@ -92,9 +123,16 @@ export default function HomeScreen() {
         }),
       ])
     );
-    pulse.start();
+    
+    if (isTracking) {
+      pulse.start();
+    } else {
+      pulse.stop();
+      pulseAnim.setValue(1);
+    }
+    
     return () => pulse.stop();
-  }, []);
+  }, [isTracking]);
 
   // Animaciones
   const headerOpacity = scrollY.interpolate({
@@ -113,6 +151,23 @@ export default function HomeScreen() {
     setRefreshing(true);
     await refresh();
     setRefreshing(false);
+  };
+
+  // ✅ FUNCIÓN PRINCIPAL - CONTROL GPS DIRECTO
+  const handleTrackingToggle = async () => {
+    if (isTracking) {
+      await stopTracking();
+    } else {
+      const success = await startTracking();
+      if (success) {
+        setTimeout(() => {
+          router.replace('/(tabs)');
+          setTimeout(() => {
+            router.push('/(tabs)/map');
+          }, 200);
+        }, 300);
+      }
+    }
   };
 
   const handleSeedRoutes = async () => {
@@ -150,6 +205,86 @@ export default function HomeScreen() {
         },
       ]
     );
+  };
+
+  // 🎨 LÓGICA DE ESTADO GPS
+  const getWorkStatusInfo = () => {
+    const isOvertime = isTracking && !isInWorkHours;
+    
+    if (isTracking) {
+      if (isOvertime) {
+        return {
+          color: '#8B5CF6',
+          status: 'GPS Activo',
+          details: 'Horas extra • Tracking manual',
+          icon: 'time'
+        };
+      }
+      
+      switch (workStatus) {
+        case 'WORKING':
+          return {
+            color: '#10B981',
+            status: 'GPS Activo',
+            details: 'En horario laboral • Tracking automático',
+            icon: 'checkmark-circle'
+          };
+        case 'BREAK':
+          return {
+            color: '#F59E0B',
+            status: 'GPS Activo',
+            details: 'En descanso • Tracking activo',
+            icon: 'pause-circle'
+          };
+        case 'OVERTIME':
+          return {
+            color: '#8B5CF6',
+            status: 'GPS Activo',
+            details: 'Horas extra • Tracking manual',
+            icon: 'time'
+          };
+        case 'OFF_DUTY':
+        default:
+          return {
+            color: '#8B5CF6',
+            status: 'GPS Activo',
+            details: 'Fuera de horario • Tracking manual',
+            icon: 'time'
+          };
+      }
+    } else {
+      switch (workStatus) {
+        case 'WORKING':
+          return {
+            color: '#EF4444',
+            status: 'GPS Inactivo',
+            details: 'En horario laboral • Tocar para activar',
+            icon: 'stop-circle'
+          };
+        case 'BREAK':
+          return {
+            color: '#F59E0B',
+            status: 'En Descanso',
+            details: 'Pausa laboral • GPS pausado',
+            icon: 'pause-circle'
+          };
+        case 'OVERTIME':
+          return {
+            color: '#8B5CF6',
+            status: 'Horas Extra',
+            details: 'Fuera de horario • Activar manualmente',
+            icon: 'time'
+          };
+        case 'OFF_DUTY':
+        default:
+          return {
+            color: '#9CA3AF',
+            status: 'Fuera de Servicio',
+            details: 'Fuera de horario • Tocar para activar',
+            icon: 'stop-circle'
+          };
+      }
+    }
   };
 
   // Filtrar rutas
@@ -225,14 +360,14 @@ export default function HomeScreen() {
     return `${dayName}, ${day} ${month}`;
   };
 
-  // Formatear hora
+  // Formatear hora para header (cada minuto)
   const formatTime = () => {
     const hours = currentTime.getHours().toString().padStart(2, '0');
     const minutes = currentTime.getMinutes().toString().padStart(2, '0');
     return `${hours}:${minutes}`;
   };
 
-  // Obtener icono de batería según nivel
+  // 🔋 OBTENER ICONO DE BATERÍA SEGÚN NIVEL
   const getBatteryIcon = () => {
     if (batteryLevel === null) return 'battery-half-outline';
     
@@ -247,7 +382,7 @@ export default function HomeScreen() {
     return 'battery-dead';
   };
 
-  // Obtener color de batería según nivel
+  // 🔋 OBTENER COLOR DE BATERÍA SEGÚN NIVEL
   const getBatteryColor = () => {
     if (batteryLevel === null) return '#999';
     
@@ -259,6 +394,8 @@ export default function HomeScreen() {
     if (batteryLevel >= 20) return '#FF9800';
     return '#f44336';
   };
+
+  const workStatusInfo = getWorkStatusInfo();
 
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
@@ -281,6 +418,19 @@ export default function HomeScreen() {
           </View>
         </BlurView>
       </Animated.View>
+
+      {/* ✅ BANNER DE ERROR GPS SI EXISTE */}
+      {gpsError && (
+        <Animated.View style={styles.errorBanner}>
+          <View style={styles.errorContent}>
+            <Ionicons name="warning" size={16} color="#fff" />
+            <Text style={styles.errorText}>GPS: {gpsError}</Text>
+            <TouchableOpacity onPress={clearError} style={styles.errorCloseButton}>
+              <Ionicons name="close" size={14} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </Animated.View>
+      )}
 
       <Animated.ScrollView
         showsVerticalScrollIndicator={false}
@@ -334,36 +484,86 @@ export default function HomeScreen() {
           </View>
         </Animated.View>
 
-        {/* Estado del Servicio */}
+        {/* ESTADO DEL SERVICIO - CONTROL PRINCIPAL DEL TRACKING */}
         <View style={styles.section}>
           <View style={[styles.serviceCard, isDark && styles.cardDark]}>
             <View style={styles.serviceHeader}>
-              <Ionicons name="flash" size={24} color="#4CAF50" />
+              <Ionicons name="flash" size={24} color={workStatusInfo.color} />
               <Text style={[styles.serviceTitle, isDark && styles.textDark]}>
                 Estado del Servicio
               </Text>
+              {/* ✅ MOSTRAR LOADING DEL GPS SI EXISTE */}
+              {isLoading && (
+                <ActivityIndicator size="small" color={workStatusInfo.color} style={{ marginLeft: 8 }} />
+              )}
             </View>
 
-            <View style={styles.gpsContainer}>
+            {/* ✅ ÁREA GPS - AHORA ES BOTÓN DIRECTO */}
+            <TouchableOpacity 
+              style={styles.gpsContainer}
+              onPress={handleTrackingToggle}
+              activeOpacity={0.7}
+              disabled={isLoading}
+            >
               <View style={styles.gpsLeftSide}>
-                <Animated.View style={[styles.gpsPulse, { transform: [{ scale: pulseAnim }] }]}>
-                  <View style={styles.gpsInner}>
-                    <View style={styles.gpsDot} />
+                <Animated.View style={[
+                  styles.gpsPulse, 
+                  { 
+                    backgroundColor: `${workStatusInfo.color}20`,
+                    transform: [{ scale: pulseAnim }]
+                  }
+                ]}>
+                  <View style={[styles.gpsInner, { backgroundColor: `${workStatusInfo.color}40` }]}>
+                    <View style={[styles.gpsDot, { backgroundColor: workStatusInfo.color }]}>
+                      <Ionicons name={workStatusInfo.icon} size={12} color="white" />
+                    </View>
                   </View>
                 </Animated.View>
                 <View style={styles.gpsTextContainer}>
                   <View style={styles.gpsStatusRow}>
-                    <View style={styles.gpsActiveDot} />
+                    <View style={[styles.gpsActiveDot, { backgroundColor: workStatusInfo.color }]} />
                     <Text style={[styles.gpsStatus, isDark && styles.textDark]}>
-                      GPS Activo
+                      {workStatusInfo.status}
                     </Text>
                   </View>
                   <Text style={[styles.gpsDetails, isDark && styles.textSecondaryDark]}>
-                    Precisión: Alta • Sincronizando
+                    {workStatusInfo.details}
                   </Text>
+                  {/* ✅ INFORMACIÓN MEJORADA DE UBICACIÓN Y SINCRONIZACIÓN */}
+                  {isTracking && currentLocation && (
+                    <Text style={[styles.gpsLocation, isDark && styles.textSecondaryDark]}>
+                      📍 Ubicación: {currentLocation.latitude.toFixed(4)}, {currentLocation.longitude.toFixed(4)}
+                    </Text>
+                  )}
+                  {isTracking && lastUpdate && (
+                    <Text style={[styles.gpsSync, isDark && styles.textSecondaryDark]}>
+                      🔄 Sync: {Math.floor((Date.now() - lastUpdate) / 1000)}s ago • Usuario: {currentUserId}
+                    </Text>
+                  )}
                 </View>
               </View>
-            </View>
+              
+              {/* ✅ BOTÓN PRINCIPAL: GPS + REDIRECCIÓN DIRECTA - LOADING STATE */}
+              <TouchableOpacity 
+                style={[
+                  styles.quickTrackingButton, 
+                  { backgroundColor: workStatusInfo.color },
+                  isLoading && { opacity: 0.6 }
+                ]}
+                onPress={handleTrackingToggle}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <Ionicons 
+                    name={isTracking ? "stop" : "play"} 
+                    size={16} 
+                    color="white" 
+                  />
+                )}
+              </TouchableOpacity>
+            </TouchableOpacity>
 
             <View style={styles.divider} />
 
@@ -371,7 +571,7 @@ export default function HomeScreen() {
               <View style={styles.scheduleContainer}>
                 <Ionicons name="time-outline" size={20} color={isDark ? '#999' : '#666'} />
                 <Text style={[styles.scheduleText, isDark && styles.textSecondaryDark]}>
-                  Horario: 08:00 - 18:00
+                  Horario: {currentSchedule?.startTime || '08:00'} - {currentSchedule?.endTime || '18:00'}
                 </Text>
               </View>
               
@@ -389,6 +589,15 @@ export default function HomeScreen() {
                 </View>
               )}
             </View>
+
+            {timeUntilNextChange && (
+              <View style={styles.timeInfo}>
+                <Ionicons name="timer-outline" size={16} color={workStatusInfo.color} />
+                <Text style={[styles.timeInfoText, { color: workStatusInfo.color }]}>
+                  {timeUntilNextChange}
+                </Text>
+              </View>
+            )}
 
             <View style={styles.progressSection}>
               <View style={styles.progressHeader}>
@@ -409,6 +618,7 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* Resto del componente igual... */}
         {/* Resumen rápido - 3 cards */}
         <View style={styles.section}>
           <View style={styles.quickSummary}>
@@ -623,7 +833,9 @@ export default function HomeScreen() {
   );
 }
 
+// ✅ ESTILOS IGUALES (sin cambios)
 const styles = StyleSheet.create({
+  // ... todos los estilos iguales que antes (sin cambios)
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
@@ -661,6 +873,37 @@ const styles = StyleSheet.create({
   textSecondaryDark: {
     color: '#999',
   },
+  
+  // ✅ BANNER DE ERROR GPS
+  errorBanner: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 100 : 120,
+    left: 16,
+    right: 16,
+    backgroundColor: '#f44336',
+    borderRadius: 8,
+    zIndex: 11,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  errorContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    gap: 8,
+  },
+  errorText: {
+    color: '#fff',
+    fontSize: 12,
+    flex: 1,
+  },
+  errorCloseButton: {
+    padding: 4,
+  },
+  
   scrollContent: {
     paddingTop: Platform.OS === 'ios' ? 100 : (StatusBar.currentHeight || 40) + 60,
     paddingHorizontal: 16,
@@ -749,6 +992,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 20,
+    justifyContent: 'space-between',
   },
   gpsLeftSide: {
     flexDirection: 'row',
@@ -759,7 +1003,6 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(76, 175, 80, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
@@ -768,15 +1011,20 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: 'rgba(76, 175, 80, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   gpsDot: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#4CAF50',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
   },
   gpsTextContainer: {
     flex: 1,
@@ -790,7 +1038,6 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#4CAF50',
     marginRight: 8,
   },
   gpsStatus: {
@@ -801,6 +1048,30 @@ const styles = StyleSheet.create({
   gpsDetails: {
     fontSize: 14,
     color: '#666',
+    marginBottom: 4,
+  },
+  gpsLocation: {
+    fontSize: 12,
+    color: '#666',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  gpsSync: {
+    fontSize: 11,
+    color: '#999',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    marginTop: 2,
+  },
+  quickTrackingButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   divider: {
     height: 1,
@@ -838,6 +1109,20 @@ const styles = StyleSheet.create({
   },
   batteryText: {
     fontSize: 14,
+    fontWeight: '600',
+  },
+  timeInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(0,0,0,0.03)',
+    borderRadius: 8,
+  },
+  timeInfoText: {
+    fontSize: 13,
     fontWeight: '600',
   },
   progressSection: {

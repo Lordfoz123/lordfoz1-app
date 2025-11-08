@@ -56,22 +56,41 @@ class GPSService {
 
   async saveLocation(userId: string, location: Location.LocationObject): Promise<void> {
     try {
-      await addDoc(collection(db, 'locations'), {
-        userId,
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        altitude: location.coords.altitude,
-        accuracy: location.coords.accuracy,
-        speed: location.coords.speed,
-        heading: location.coords.heading,
+      // ✅ CREAR OBJETO CON VALORES SEGUROS
+      const locationData: any = {
+        userId: userId || 'unknown',
+        latitude: location.coords.latitude || 0,
+        longitude: location.coords.longitude || 0,
+        accuracy: location.coords.accuracy || 0,
         timestamp: serverTimestamp(),
         createdAt: new Date().toISOString(),
         platform: Platform.OS,
-      });
+      };
+
+      // ✅ AGREGAR CAMPOS OPCIONALES SOLO SI TIENEN VALOR
+      if (location.coords.altitude !== null && location.coords.altitude !== undefined) {
+        locationData.altitude = location.coords.altitude;
+      }
+
+      if (location.coords.speed !== null && location.coords.speed !== undefined) {
+        locationData.speed = location.coords.speed;
+      }
+
+      if (location.coords.heading !== null && location.coords.heading !== undefined) {
+        locationData.heading = location.coords.heading;
+      }
+
+      // ✅ FILTRAR CAMPOS UNDEFINED/NULL
+      const cleanData = Object.fromEntries(
+        Object.entries(locationData).filter(([_, value]) => value !== undefined && value !== null)
+      );
+
+      await addDoc(collection(db, 'locations'), cleanData);
 
       console.log('✅ Ubicación guardada en Firestore');
     } catch (error) {
       console.error('❌ Error al guardar ubicación:', error);
+      // ✅ NO LANZAR ERROR PARA NO INTERRUMPIR EL TRACKING
     }
   }
 
@@ -87,9 +106,10 @@ class GPSService {
       this.userId = userId;
       this.tracking = true;
 
+      // ✅ GUARDAR UBICACIÓN INICIAL DE FORMA SEGURA
       const initialLocation = await this.getCurrentLocation();
-      if (initialLocation) {
-        await this.saveLocation(userId, initialLocation);
+      if (initialLocation && this.userId) {
+        await this.saveLocation(this.userId, initialLocation);
       }
 
       this.locationSubscription = await Location.watchPositionAsync(
@@ -100,7 +120,8 @@ class GPSService {
         },
         async (location) => {
           console.log('📍 Nueva ubicación detectada');
-          if (this.userId) {
+          // ✅ VALIDAR QUE TENEMOS USUARIO ANTES DE GUARDAR
+          if (this.userId && location && location.coords) {
             await this.saveLocation(this.userId, location);
           }
         }

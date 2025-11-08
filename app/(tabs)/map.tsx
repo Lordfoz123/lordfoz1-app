@@ -1,10 +1,13 @@
 import MonitoringMap from '@/components/MonitoringMap';
 import { getAllMatrices } from '@/constants/monitoring';
+import { useGPS } from '@/contexts/GPSContext';
+import { useRealTimeLocation } from '@/hooks/useRealTimeLocation';
 import { useRoutes } from '@/hooks/useRoutes';
+import { useWorkSchedule } from '@/hooks/useWorkSchedule';
 import { MonitoringPoint } from '@/types/route.types';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import React, { useMemo, useRef, useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -26,12 +29,104 @@ export default function MapScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { routes } = useRoutes();
+  
+  // ✅ OBTENER PARÁMETROS DE NAVEGACIÓN DEL ROUTE-DETAIL
+  const searchParams = useLocalSearchParams();
+  
+  // ✅ HOOKS PARA UBICACIÓN Y GPS - SOLO LECTURA
+  const { 
+    isTracking, 
+    isLoading, 
+    error: gpsError, 
+    lastUpdate,
+    clearError 
+  } = useGPS();
+  
+  const { currentLocation } = useRealTimeLocation(isTracking ? 'cymperu' : null);
+  const { workStatus, isInWorkHours } = useWorkSchedule('cymperu');
+  
   const [selectedMatrix, setSelectedMatrix] = useState<string | null>(null);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
-  const [isLegendVisible, setIsLegendVisible] = useState(false);
+  
+  // ✅ ESTADOS SIMPLIFICADOS PARA CENTRADO DE MAPA
+  const [centerCoords, setCenterCoords] = useState<{
+    latitude: number;
+    longitude: number;
+    latitudeDelta: number;
+    longitudeDelta: number;
+  } | null>(null);
+  
+  // ✅ REF PARA EVITAR BUCLES INFINITOS
+  const hasCenteredRef = useRef(false);
+  const lastParamsRef = useRef<string>('');
   
   const panelAnimation = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
+
+  // ✅ PROCESAR PARÁMETROS DE NAVEGACIÓN SIN CAUSAR BUCLES
+  useEffect(() => {
+    const paramsKey = `${searchParams.centerLat}-${searchParams.centerLng}-${searchParams.pointId}`;
+    
+    // Solo procesar si los parámetros cambiaron y no hemos centrado recientemente
+    if (searchParams.centerLat && searchParams.centerLng && 
+        paramsKey !== lastParamsRef.current && !hasCenteredRef.current) {
+      
+      console.log('🎯 Procesando nuevos parámetros:', searchParams);
+      
+      const lat = parseFloat(searchParams.centerLat as string);
+      const lng = parseFloat(searchParams.centerLng as string);
+      const latDelta = parseFloat(searchParams.latitudeDelta as string) || 0.002;
+      const lngDelta = parseFloat(searchParams.longitudeDelta as string) || 0.002;
+      
+      console.log('🎯 Centrando en coordenadas:', lat, lng, 'con zoom:', latDelta);
+      
+      // ✅ MARCAR COMO PROCESADO PARA EVITAR BUCLES
+      hasCenteredRef.current = true;
+      lastParamsRef.current = paramsKey;
+      
+      // ✅ CONFIGURAR COORDENADAS PARA CENTRADO
+      setCenterCoords({
+        latitude: lat,
+        longitude: lng,
+        latitudeDelta: latDelta,
+        longitudeDelta: lngDelta,
+      });
+      
+      // ✅ SI VIENE DE UNA RUTA ESPECÍFICA, FILTRAR POR ESA RUTA
+      if (searchParams.routeId && searchParams.focusMode === 'single' && routes.length > 0) {
+        const route = routes.find(r => r.id === searchParams.routeId);
+        if (route && route.monitoringPoints) {
+          const point = route.monitoringPoints.find(p => p.id === searchParams.pointId);
+          if (point) {
+            console.log('🎯 Configurando filtro de matriz:', point.matrix);
+            setSelectedMatrix(point.matrix);
+          }
+        }
+      }
+      
+      // ✅ RESET DESPUÉS DE 3 SEGUNDOS SIN CAUSAR RE-RENDER
+      setTimeout(() => {
+        hasCenteredRef.current = false;
+      }, 3000);
+    }
+    
+    // ✅ SI VIENE PARA VER LA RUTA COMPLETA
+    if (searchParams.viewMode === 'fullRoute' && searchParams.routeId) {
+      console.log('🗺️ Modo ruta completa para ruta:', searchParams.routeId);
+      setSelectedMatrix(null); // Ver todos los puntos
+    }
+  }, [searchParams.centerLat, searchParams.centerLng, searchParams.pointId, routes.length]);
+
+  // ✅ LIMPIAR ERRORES GPS AUTOMÁTICAMENTE
+  useEffect(() => {
+    if (gpsError) {
+      const timer = setTimeout(() => {
+        clearError();
+      }, 5000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [gpsError, clearError]);
 
   const allPoints: MonitoringPoint[] = useMemo(() => {
     return routes.flatMap(route => route.monitoringPoints || []);
@@ -51,11 +146,18 @@ export default function MapScreen() {
     return counts;
   }, [allPoints]);
 
+  // ✅ ESTADÍSTICAS POR ESTADO CORREGIDAS
+  const statusCounts = useMemo(() => {
+    const completed = allPoints.filter(p => p.status === 'completed').length;
+    const pending = allPoints.filter(p => p.status === 'pending').length;
+    
+    return { completed, pending };
+  }, [allPoints]);
+
   const matrices = getAllMatrices();
 
   const openPanel = () => {
     setIsPanelOpen(true);
-    setIsLegendVisible(false);
     Animated.parallel([
       Animated.spring(panelAnimation, {
         toValue: SCREEN_HEIGHT - PANEL_HEIGHT,
@@ -177,23 +279,24 @@ export default function MapScreen() {
     if (item.type === 'stats') {
       return (
         <View style={styles.statsSection}>
-          <Text style={[styles.statsTitle, isDark && styles.textDark]}>Resumen</Text>
+          <Text style={[styles.statsTitle, isDark && styles.textDark]}>Resumen por Estado</Text>
+          
           <View style={styles.statsGrid}>
             <View style={[styles.statCard, isDark && styles.statCardDark]}>
               <View style={[styles.statIconCircle, { backgroundColor: '#E8F5E9' }]}>
-                <Ionicons name="checkmark-circle" size={22} color="#4CAF50" />
+                <Ionicons name="checkmark-circle" size={22} color="#10B981" />
               </View>
               <Text style={[styles.statNumber, isDark && styles.textDark]}>
-                {allPoints.filter(p => p.status === 'completed').length}
+                {statusCounts.completed}
               </Text>
               <Text style={[styles.statLabel, isDark && styles.textSecondaryDark]}>Completados</Text>
             </View>
             <View style={[styles.statCard, isDark && styles.statCardDark]}>
-              <View style={[styles.statIconCircle, { backgroundColor: '#FFF3E0' }]}>
-                <Ionicons name="time" size={22} color="#FF9800" />
+              <View style={[styles.statIconCircle, { backgroundColor: '#F3F4F6' }]}>
+                <Ionicons name="time" size={22} color="#6B7280" />
               </View>
               <Text style={[styles.statNumber, isDark && styles.textDark]}>
-                {allPoints.filter(p => p.status === 'pending').length}
+                {statusCounts.pending}
               </Text>
               <Text style={[styles.statLabel, isDark && styles.textSecondaryDark]}>Pendientes</Text>
             </View>
@@ -209,13 +312,22 @@ export default function MapScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      {/* Mapa en pantalla completa */}
+      {/* MAPA CON PARÁMETROS DE CENTRADO */}
       <View style={styles.mapContainer}>
         {filteredPoints.length > 0 ? (
           <MonitoringMap
             points={filteredPoints}
+            currentLocation={currentLocation}
+            isTracking={isTracking}
+            workStatus={workStatus}
+            isInWorkHours={isInWorkHours}
             showRoute={false}
             showLegend={false}
+            showGPSControls={true}
+            selectedMatrix={selectedMatrix}
+            // ✅ PASAR PARÁMETROS DE CENTRADO SIN CAUSAR BUCLES
+            shouldCenterOnUser={false} // ✅ SIEMPRE FALSE PARA EVITAR CONFLICTOS
+            centerCoordinates={centerCoords}
             onPointPress={(point) => {
               const route = routes.find(r => 
                 r.monitoringPoints?.some(p => p.id === point.id)
@@ -233,7 +345,7 @@ export default function MapScreen() {
         )}
       </View>
 
-      {/* Barra flotante estilo Google Maps */}
+      {/* ✅ BARRA DE BÚSQUEDA CON INFO DE NAVEGACIÓN */}
       <View style={styles.searchBarWrapper}>
         <TouchableOpacity 
           style={[styles.searchBar, isDark && styles.searchBarDark]}
@@ -243,47 +355,37 @@ export default function MapScreen() {
           <Ionicons name="location" size={22} color="#4CAF50" />
           <View style={styles.searchBarContent}>
             <Text style={[styles.searchBarTitle, isDark && styles.textDark]}>
-              {selectedMatrixData ? selectedMatrixData.name : 'Puntos de Monitoreo'}
+              {searchParams.pointName 
+                ? `📍 ${searchParams.pointName}`
+                : selectedMatrixData 
+                  ? selectedMatrixData.name 
+                  : 'Puntos de Monitoreo'
+              }
             </Text>
             <Text style={[styles.searchBarSubtitle, isDark && styles.textSecondaryDark]}>
-              {filteredPoints.length} puntos visibles
+              {searchParams.pointIndex 
+                ? `Punto #${searchParams.pointIndex} • Zoom cercano`
+                : `${filteredPoints.length} puntos`
+              }
+              {isTracking && ' • GPS 🟢'}
+              {isLoading && ' • Cargando...'}
             </Text>
           </View>
           <Ionicons name="chevron-down" size={18} color={isDark ? '#999' : '#666'} />
         </TouchableOpacity>
       </View>
 
-      {/* BOTÓN DE LEYENDA - ESTILO NATIVO BLANCO */}
-      {!isPanelOpen && (
-        <TouchableOpacity 
-          style={[styles.legendButton, isLegendVisible && styles.legendButtonActive]}
-          onPress={() => setIsLegendVisible(!isLegendVisible)}
-          activeOpacity={0.7}
-        >
-          <Ionicons 
-            name={isLegendVisible ? "information-circle" : "information-circle-outline"}
-            size={26} 
-            color={isLegendVisible ? '#4CAF50' : '#666'} 
-          />
-        </TouchableOpacity>
-      )}
-
-      {/* LEYENDA - ESQUINA INFERIOR IZQUIERDA */}
-      {!isPanelOpen && isLegendVisible && (
-        <View style={[styles.legend, isDark && styles.legendDark]}>
-          <View style={styles.legendHeader}>
-            <Ionicons name="layers" size={16} color={isDark ? '#fff' : '#333'} />
-            <Text style={[styles.legendTitle, isDark && styles.textDark]}>Matrices</Text>
+      {/* ✅ BANNER DE ERROR GPS MEJORADO */}
+      {gpsError && (
+        <Animated.View style={styles.errorBanner}>
+          <View style={styles.errorContent}>
+            <Ionicons name="warning" size={16} color="#fff" />
+            <Text style={styles.errorText}>GPS: {gpsError}</Text>
+            <TouchableOpacity onPress={clearError} style={styles.errorCloseButton}>
+              <Ionicons name="close" size={14} color="#fff" />
+            </TouchableOpacity>
           </View>
-          {matrices.map((config, idx) => (
-            <View key={`legend-${idx}`} style={styles.legendItem}>
-              <View style={[styles.legendIcon, { backgroundColor: config.color }]}>
-                <Ionicons name={config.icon} size={14} color="#fff" />
-              </View>
-              <Text style={[styles.legendText, isDark && styles.textDark]}>{config.name}</Text>
-            </View>
-          ))}
-        </View>
+        </Animated.View>
       )}
 
       {/* Overlay con opacidad */}
@@ -336,6 +438,7 @@ export default function MapScreen() {
   );
 }
 
+// ✅ ESTILOS IGUALES (sin cambios)
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -392,79 +495,43 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 2,
   },
-legendButton: {
-  position: 'absolute',
-  bottom: Platform.OS === 'ios' ? 75 : 85,  // ← AÚN MÁS CERCA del botón nativo
-  right: 10,
-  width: 56,
-  height: 56,
-  borderRadius: 28,
-  backgroundColor: '#fff',
-  justifyContent: 'center',
-  alignItems: 'center',
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.25,
-  shadowRadius: 8,
-  elevation: 8,
-},
-legendButtonActive: {
-  backgroundColor: '#E8F5E9',
-},
-legend: {
-  position: 'absolute',
-  bottom: Platform.OS === 'ios' ? 20 : 30,  // ← MÁS ABAJO, cerca del TabBar
-  left: 16,
-  backgroundColor: 'rgba(255, 255, 255, 0.98)',
-  borderRadius: 16,
-  padding: 16,
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.25,
-  shadowRadius: 8,
-  elevation: 9,
-  minWidth: 150,
-  maxWidth: 200,
-},
-
-  legendDark: {
-    backgroundColor: 'rgba(28, 28, 30, 0.98)',
-  },
-  legendHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    gap: 8,
-  },
-  legendTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#333',
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 6,
-    gap: 10,
-  },
-  legendIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  legendText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
-  },
   textDark: {
     color: '#fff',
   },
   textSecondaryDark: {
     color: '#999',
   },
+  
+  // ✅ BANNER DE ERROR MEJORADO
+  errorBanner: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 120 : 140,
+    left: 16,
+    right: 16,
+    backgroundColor: '#f44336',
+    borderRadius: 8,
+    zIndex: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  errorContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    gap: 8,
+  },
+  errorText: {
+    color: '#fff',
+    fontSize: 12,
+    flex: 1,
+  },
+  errorCloseButton: {
+    padding: 4,
+  },
+  
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000',

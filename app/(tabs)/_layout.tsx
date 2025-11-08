@@ -86,7 +86,22 @@ export default function TabLayout() {
         }}
       />
 
-      {/* ✅ TAB 3: PERFIL */}
+      {/* ✅ TAB 3: CALENDARIO - NUEVO */}
+      <Tabs.Screen
+        name="calendar"
+        options={{
+          title: 'Calendario',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons 
+              name={focused ? 'calendar' : 'calendar-outline'} 
+              size={26} 
+              color={color} 
+            />
+          ),
+        }}
+      />
+
+      {/* ✅ TAB 4: PERFIL */}
       <Tabs.Screen
         name="profile"
         options={{

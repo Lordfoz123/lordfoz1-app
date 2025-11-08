@@ -1,12 +1,17 @@
+import { RoutePreview } from '@/components/RoutePreview';
+import { useGPS } from '@/contexts/GPSContext';
+import { useRealTimeLocation } from '@/hooks/useRealTimeLocation';
 import { db } from '@/services/firebase';
 import { Route } from '@/types/route.types';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Platform,
+  Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -15,6 +20,7 @@ import {
   useColorScheme,
   View,
 } from 'react-native';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 
 export default function RouteDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -23,9 +29,22 @@ export default function RouteDetailScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
+  // ✅ ESTADOS PARA NAVEGACIÓN DIRECTA
+  const [showNavigationPanel, setShowNavigationPanel] = useState(false);
+  const [selectedPointForNav, setSelectedPointForNav] = useState<any>(null);
+
+  // ✅ HOOKS PARA GPS Y UBICACIÓN
+  const { isTracking } = useGPS();
+  const { currentLocation } = useRealTimeLocation(isTracking ? 'cymperu' : null);
+
+  // ✅ ANIMACIONES NATIVAS PARA ROUTE PREVIEW
+  const routeSheetAnimation = useRef(new Animated.Value(300)).current;
+  const routeOverlayOpacity = useRef(new Animated.Value(0)).current;
+
   useEffect(() => {
     const fetchRoute = async () => {
       try {
+        console.log('🔄 Cargando ruta con ID:', id);
         const routeDoc = await getDoc(doc(db, 'routes', id as string));
         if (routeDoc.exists()) {
           const data = routeDoc.data();
@@ -36,16 +55,135 @@ export default function RouteDetailScreen() {
             updatedAt: data.updatedAt?.toDate() || new Date(),
             scheduledDate: data.scheduledDate?.toDate(),
           } as Route);
+          console.log('✅ Ruta cargada:', data.name);
+        } else {
+          console.log('❌ Ruta no encontrada');
         }
       } catch (error) {
-        console.error('Error al cargar ruta:', error);
+        console.error('❌ Error al cargar ruta:', error);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchRoute();
+    if (id) {
+      fetchRoute();
+    }
   }, [id]);
+
+  // ✅ FUNCIÓN PARA NAVEGAR A UN PUNTO ESPECÍFICO CON ZOOM MUY CERCANO
+  const navigateToPoint = (point: any, index: number) => {
+    console.log('🎯 Navegando a punto:', point.name, 'Coordenadas:', point.location);
+    
+    router.push({
+      pathname: '/(tabs)/map',
+      params: {
+        centerLat: point.location.latitude.toString(),
+        centerLng: point.location.longitude.toString(),
+        pointId: point.id,
+        pointName: point.name,
+        pointIndex: (index + 1).toString(),
+        routeId: route?.id,
+        zoomLevel: 'veryClose',
+        latitudeDelta: '0.002',
+        longitudeDelta: '0.002',
+        focusMode: 'single',
+      }
+    });
+  };
+
+  // ✅ FUNCIÓN PARA NAVEGACIÓN DIRECTA CON ANIMACIONES NATIVAS
+  const showDirectNavigation = (point: any) => {
+    if (!currentLocation) {
+      alert('GPS no disponible. Activa la ubicación para usar navegación.');
+      return;
+    }
+    
+    setSelectedPointForNav(point);
+    setShowNavigationPanel(true);
+    
+    // ✅ ANIMACIÓN NATIVA AL ABRIR (IGUAL QUE EN EL MAPA)
+    Animated.parallel([
+      Animated.spring(routeSheetAnimation, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 65,
+        friction: 11,
+      }),
+      Animated.timing(routeOverlayOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const closeNavigationPanel = () => {
+    // ✅ ANIMACIÓN NATIVA AL CERRAR
+    Animated.parallel([
+      Animated.spring(routeSheetAnimation, {
+        toValue: 300,
+        useNativeDriver: true,
+        tension: 65,
+        friction: 11,
+      }),
+      Animated.timing(routeOverlayOpacity, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowNavigationPanel(false);
+      setSelectedPointForNav(null);
+    });
+  };
+
+  // ✅ FUNCIÓN PARA VER TODA LA RUTA EN EL MAPA
+  const viewRouteOnMap = () => {
+    console.log('🗺️ Viendo ruta completa en mapa');
+    
+    router.push({
+      pathname: '/(tabs)/map',
+      params: {
+        routeId: route?.id,
+        viewMode: 'fullRoute',
+        selectedMatrix: null,
+      }
+    });
+  };
+
+  // ✅ CALCULAR REGIÓN DEL MINI MAPA PARA MOSTRAR TODA LA RUTA
+  const getMapRegion = () => {
+    if (!route?.monitoringPoints || route.monitoringPoints.length === 0) {
+      return {
+        latitude: -12.0464,
+        longitude: -77.0428,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      };
+    }
+
+    const points = route.monitoringPoints;
+    const lats = points.map(p => p.location.latitude);
+    const lngs = points.map(p => p.location.longitude);
+
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+
+    const centerLat = (minLat + maxLat) / 2;
+    const centerLng = (minLng + maxLng) / 2;
+    const deltaLat = (maxLat - minLat) * 1.4;
+    const deltaLng = (maxLng - minLng) * 1.4;
+
+    return {
+      latitude: centerLat,
+      longitude: centerLng,
+      latitudeDelta: Math.max(deltaLat, 0.01),
+      longitudeDelta: Math.max(deltaLng, 0.01),
+    };
+  };
 
   if (loading) {
     return (
@@ -113,6 +251,16 @@ export default function RouteDetailScreen() {
     }
   };
 
+  // ✅ OBTENER COLOR DEL PUNTO SEGÚN ESTADO
+  const getPointStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return '#10B981';
+      case 'pending': return '#6B7280';
+      case 'in-progress': return '#F59E0B';
+      default: return '#9CA3AF';
+    }
+  };
+
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
       <StatusBar
@@ -134,11 +282,17 @@ export default function RouteDetailScreen() {
           <Text style={[styles.headerTitle, isDark && styles.headerTitleDark]}>
             Detalle de Ruta
           </Text>
-          <View style={{ width: 40 }} />
+          {/* ✅ BOTÓN PARA VER RUTA COMPLETA EN MAPA */}
+          <TouchableOpacity
+            style={styles.mapIconButton}
+            onPress={viewRouteOnMap}
+          >
+            <Ionicons name="map" size={24} color="#4CAF50" />
+          </TouchableOpacity>
         </View>
       </View>
 
-      <ScrollView style={styles.content}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Información principal */}
         <View style={[styles.card, isDark && styles.cardDark]}>
           <Text style={[styles.routeName, isDark && styles.routeNameDark]}>
@@ -163,6 +317,87 @@ export default function RouteDetailScreen() {
             </View>
           </View>
         </View>
+
+        {/* ✅ MINI MAPA DE RUTA COMPLETA */}
+        {route.monitoringPoints && route.monitoringPoints.length > 0 && (
+          <View style={[styles.card, isDark && styles.cardDark]}>
+            <View style={styles.mapHeader}>
+              <Text style={[styles.cardTitle, isDark && styles.cardTitleDark]}>
+                Vista de Ruta
+              </Text>
+              <TouchableOpacity
+                style={styles.fullMapButton}
+                onPress={viewRouteOnMap}
+              >
+                <Text style={styles.fullMapButtonText}>Ver completo</Text>
+                <Ionicons name="open-outline" size={16} color="#4CAF50" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.miniMapContainer}>
+              <MapView
+                style={styles.miniMap}
+                provider={PROVIDER_GOOGLE}
+                region={getMapRegion()}
+                scrollEnabled={false}
+                zoomEnabled={false}
+                rotateEnabled={false}
+                pitchEnabled={false}
+                showsUserLocation={false}
+                showsMyLocationButton={false}
+                showsCompass={false}
+                toolbarEnabled={false}
+              >
+                {/* ✅ MARCADORES DE TODOS LOS PUNTOS */}
+                {route.monitoringPoints.map((point, index) => (
+                  <Marker
+                    key={`minimap-${point.id}-${index}`}
+                    coordinate={{
+                      latitude: point.location.latitude,
+                      longitude: point.location.longitude,
+                    }}
+                  >
+                    <View style={styles.miniMarker}>
+                      <View style={[
+                        styles.miniMarkerInner,
+                        { backgroundColor: getPointStatusColor(point.status) }
+                      ]}>
+                        {point.status === 'completed' ? (
+                          <Ionicons name="checkmark" size={10} color="#fff" />
+                        ) : (
+                          <Text style={styles.miniMarkerText}>{index + 1}</Text>
+                        )}
+                      </View>
+                    </View>
+                  </Marker>
+                ))}
+
+                {/* ✅ LÍNEA CONECTANDO TODOS LOS PUNTOS */}
+                <Polyline
+                  coordinates={route.monitoringPoints.map(p => ({
+                    latitude: p.location.latitude,
+                    longitude: p.location.longitude,
+                  }))}
+                  strokeColor="#4CAF50"
+                  strokeWidth={2}
+                  strokePattern={[5, 5]}
+                />
+              </MapView>
+
+              {/* ✅ OVERLAY CLICKEABLE PARA ABRIR MAPA COMPLETO */}
+              <TouchableOpacity
+                style={styles.mapOverlay}
+                onPress={viewRouteOnMap}
+                activeOpacity={0.8}
+              >
+                <View style={styles.mapOverlayContent}>
+                  <Ionicons name="expand" size={20} color="rgba(255,255,255,0.9)" />
+                  <Text style={styles.mapOverlayText}>Tocar para ampliar</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Estadísticas */}
         <View style={[styles.card, isDark && styles.cardDark]}>
@@ -223,31 +458,46 @@ export default function RouteDetailScreen() {
           </View>
         </View>
 
-        {/* Puntos de Monitoreo */}
+        {/* ✅ PUNTOS DE MONITOREO CON NAVEGACIÓN INTEGRADA */}
         <View style={[styles.card, isDark && styles.cardDark]}>
           <Text style={[styles.cardTitle, isDark && styles.cardTitleDark]}>
             Puntos de Monitoreo ({route.monitoringPoints?.length || 0})
           </Text>
 
           {route.monitoringPoints && route.monitoringPoints.length > 0 ? (
-            route.monitoringPoints.map((point) => (
-              <View key={point.id} style={[styles.pointCard, isDark && styles.pointCardDark]}>
+            route.monitoringPoints.map((point, index) => (
+              <View
+                key={`point-${point.id}-${index}`}
+                style={[styles.pointCard, isDark && styles.pointCardDark]}
+              >
                 <View style={styles.pointHeader}>
                   <View style={styles.pointLeft}>
-                    <Text style={[styles.pointSequence, isDark && styles.pointSequenceDark]}>
-                      #{point.sequence}
-                    </Text>
-                    <Text style={[styles.pointName, isDark && styles.pointNameDark]}>
-                      {point.name}
-                    </Text>
+                    <View style={[
+                      styles.pointSequenceCircle,
+                      { backgroundColor: getPointStatusColor(point.status) }
+                    ]}>
+                      {point.status === 'completed' ? (
+                        <Ionicons name="checkmark" size={16} color="#fff" />
+                      ) : (
+                        <Text style={styles.pointSequenceText}>
+                          #{index + 1}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={styles.pointInfo}>
+                      <Text style={[styles.pointName, isDark && styles.pointNameDark]}>
+                        {point.name}
+                      </Text>
+                      <Text style={[styles.pointAddress, isDark && styles.pointAddressDark]}>
+                        {point.address}
+                      </Text>
+                      <Text style={[styles.pointCoordinates, isDark && styles.pointCoordinatesDark]}>
+                        📍 {point.location.latitude.toFixed(5)}, {point.location.longitude.toFixed(5)}
+                      </Text>
+                    </View>
                   </View>
-                  {point.status === 'completed' && (
-                    <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-                  )}
                 </View>
-                <Text style={[styles.pointAddress, isDark && styles.pointAddressDark]}>
-                  {point.address}
-                </Text>
+
                 {point.monitoringData?.parameters && (
                   <View style={styles.parametersContainer}>
                     <Text style={[styles.parametersLabel, isDark && styles.parametersLabelDark]}>
@@ -258,17 +508,101 @@ export default function RouteDetailScreen() {
                     </Text>
                   </View>
                 )}
+
+                {/* ✅ BOTONES DE NAVEGACIÓN */}
+                <View style={styles.navigationButtons}>
+                  <TouchableOpacity
+                    style={[styles.navButton, styles.directNavButton]}
+                    onPress={() => showDirectNavigation(point)}
+                    disabled={!currentLocation}
+                  >
+                    <Ionicons name="navigate" size={16} color="#fff" />
+                    <Text style={styles.navButtonText}>
+                      {currentLocation ? 'Ir aquí' : 'GPS Off'}
+                    </Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    style={[styles.navButton, styles.mapNavButton]}
+                    onPress={() => navigateToPoint(point, index)}
+                  >
+                    <Ionicons name="map" size={16} color="#fff" />
+                    <Text style={styles.navButtonText}>Ver en mapa</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.pointFooter}>
+                  <View style={[
+                    styles.statusBadge,
+                    { backgroundColor: getPointStatusColor(point.status) + '20' }
+                  ]}>
+                    <Text style={[
+                      styles.statusBadgeText,
+                      { color: getPointStatusColor(point.status) }
+                    ]}>
+                      {point.status === 'completed' ? 'Completado' : 
+                       point.status === 'pending' ? 'Pendiente' : 'En progreso'}
+                    </Text>
+                  </View>
+                  <View style={styles.gpsStatus}>
+                    <Ionicons 
+                      name={currentLocation ? "location" : "location-outline"} 
+                      size={14} 
+                      color={currentLocation ? "#4CAF50" : "#999"} 
+                    />
+                    <Text style={[styles.gpsStatusText, { color: currentLocation ? "#4CAF50" : "#999" }]}>
+                      {currentLocation ? 'GPS Activo' : 'GPS Inactivo'}
+                    </Text>
+                  </View>
+                </View>
               </View>
             ))
           ) : (
-            <Text style={[styles.noPointsText, isDark && styles.noPointsTextDark]}>
-              No hay puntos de monitoreo
-            </Text>
+            <View style={styles.emptyState}>
+              <Ionicons name="location-outline" size={48} color={isDark ? '#666' : '#ccc'} />
+              <Text style={[styles.noPointsText, isDark && styles.noPointsTextDark]}>
+                No hay puntos de monitoreo asignados
+              </Text>
+            </View>
           )}
         </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {/* ✅ PANEL DE NAVEGACIÓN DIRECTA CON ANIMACIONES NATIVAS */}
+      {showNavigationPanel && selectedPointForNav && currentLocation && (
+        <>
+          {/* OVERLAY OPACO ANIMADO */}
+          <Animated.View
+            style={[
+              styles.navigationOverlay,
+              { opacity: routeOverlayOpacity.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] }) }
+            ]}
+          >
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeNavigationPanel} />
+          </Animated.View>
+
+          {/* SHEET ANIMADO */}
+          <Animated.View
+            style={[
+              styles.routeSheetContainer,
+              { transform: [{ translateY: routeSheetAnimation }] }
+            ]}
+          >
+            <RoutePreview
+              currentLocation={currentLocation}
+              destination={{
+                latitude: selectedPointForNav.location.latitude,
+                longitude: selectedPointForNav.location.longitude,
+              }}
+              destinationName={selectedPointForNav.name}
+              onClose={closeNavigationPanel}
+              // ✅ NO PASAR onShowDetails aquí porque ya estamos en el detail
+            />
+          </Animated.View>
+        </>
+      )}
     </View>
   );
 }
@@ -285,6 +619,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   headerDark: {
     backgroundColor: '#1c1c1e',
@@ -303,6 +642,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  mapIconButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    borderRadius: 20,
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
@@ -317,13 +664,13 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 16,
+    padding: 20,
     marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowRadius: 8,
     elevation: 3,
   },
   cardDark: {
@@ -334,14 +681,16 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000',
     marginBottom: 8,
+    lineHeight: 30,
   },
   routeNameDark: {
     color: '#fff',
   },
   description: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#666',
     marginBottom: 16,
+    lineHeight: 20,
   },
   descriptionDark: {
     color: '#999',
@@ -354,12 +703,92 @@ const styles = StyleSheet.create({
   badge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 8,
+    borderRadius: 12,
   },
   badgeText: {
     fontSize: 12,
     fontWeight: '600',
   },
+
+  // ✅ ESTILOS DEL MINI MAPA
+  mapHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  fullMapButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    borderRadius: 8,
+  },
+  fullMapButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+  miniMapContainer: {
+    height: 180,
+    borderRadius: 12,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#f0f0f0',
+  },
+  miniMap: {
+    flex: 1,
+  },
+  miniMarker: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  miniMarkerInner: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  miniMarkerText: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  mapOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mapOverlayContent: {
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  mapOverlayText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
   cardTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -372,7 +801,7 @@ const styles = StyleSheet.create({
   statsGrid: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   statItem: {
     alignItems: 'center',
@@ -382,6 +811,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000',
     marginTop: 8,
+    marginBottom: 4,
   },
   statValueDark: {
     color: '#fff',
@@ -389,7 +819,7 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 12,
     color: '#666',
-    marginTop: 4,
+    fontWeight: '500',
   },
   statLabelDark: {
     color: '#999',
@@ -405,12 +835,13 @@ const styles = StyleSheet.create({
   progressLabel: {
     fontSize: 14,
     color: '#666',
+    fontWeight: '500',
   },
   progressLabelDark: {
     color: '#999',
   },
   progressPercentage: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#4CAF50',
   },
@@ -426,41 +857,64 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     backgroundColor: '#4CAF50',
+    borderRadius: 4,
   },
+
+  // ✅ ESTILOS DE PUNTOS CON NAVEGACIÓN
   pointCard: {
     backgroundColor: '#f9f9f9',
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 16,
+    padding: 16,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(76, 175, 80, 0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
   },
   pointCardDark: {
     backgroundColor: '#2c2c2e',
+    borderColor: 'rgba(76, 175, 80, 0.2)',
   },
   pointHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
+    alignItems: 'flex-start',
+    marginBottom: 12,
   },
   pointLeft: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flex: 1,
   },
-  pointSequence: {
+  pointSequenceCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  pointSequenceText: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#4CAF50',
-    marginRight: 8,
+    color: '#fff',
   },
-  pointSequenceDark: {
-    color: '#4CAF50',
+  pointInfo: {
+    flex: 1,
   },
   pointName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#000',
-    flex: 1,
+    marginBottom: 4,
   },
   pointNameDark: {
     color: '#fff',
@@ -468,13 +922,23 @@ const styles = StyleSheet.create({
   pointAddress: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 8,
+    marginBottom: 4,
+    lineHeight: 18,
   },
   pointAddressDark: {
     color: '#999',
   },
+  pointCoordinates: {
+    fontSize: 11,
+    color: '#999',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  pointCoordinatesDark: {
+    color: '#666',
+  },
   parametersContainer: {
-    marginTop: 4,
+    marginBottom: 12,
+    paddingLeft: 48,
   },
   parametersLabel: {
     fontSize: 12,
@@ -488,15 +952,92 @@ const styles = StyleSheet.create({
   parametersText: {
     fontSize: 12,
     color: '#666',
+    lineHeight: 16,
   },
   parametersTextDark: {
     color: '#999',
+  },
+
+  // ✅ BOTONES DE NAVEGACIÓN
+  navigationButtons: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+    paddingLeft: 48,
+  },
+  navButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 6,
+  },
+  directNavButton: {
+    backgroundColor: '#4CAF50',
+  },
+  mapNavButton: {
+    backgroundColor: '#2196F3',
+  },
+  navButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  pointFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingLeft: 48,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  gpsStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  gpsStatusText: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
+
+  // ✅ ANIMACIONES NATIVAS PARA ROUTE PREVIEW
+  routeSheetContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 1001,
+  },
+  navigationOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#000',
+    zIndex: 1000,
+  },
+
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
   },
   noPointsText: {
     fontSize: 14,
     color: '#999',
     textAlign: 'center',
-    paddingVertical: 20,
+    marginTop: 12,
   },
   noPointsTextDark: {
     color: '#666',
@@ -534,6 +1075,7 @@ const styles = StyleSheet.create({
     color: '#000',
     marginTop: 16,
     marginBottom: 24,
+    textAlign: 'center',
   },
   errorTextDark: {
     color: '#fff',
