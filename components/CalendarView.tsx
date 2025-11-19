@@ -1,18 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  Animated,
   Dimensions,
-  PanResponder,
+  Modal,
   Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   useColorScheme,
   View,
 } from 'react-native';
+// ✅ AGREGAR ESTE IMPORT
+import { Picker } from '@react-native-picker/picker';
 import { CreateEventModal } from './CreateEventModal';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -37,18 +39,30 @@ export default function CalendarView() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   
-  const [currentDate, setCurrentDate] = useState(new Date(2025, 10, 5)); // 5 Nov 2025
-  const [selectedDate, setSelectedDate] = useState(new Date(2025, 10, 5));
+  const today = new Date();
+  const [currentDate, setCurrentDate] = useState(today);
+  const [selectedDate, setSelectedDate] = useState(today);
   const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [matrixFilter, setMatrixFilter] = useState<MatrixFilter>('all');
+  
+  // ✅ NUEVOS ESTADOS
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [visibleMonth, setVisibleMonth] = useState(today.getMonth());
+  const [visibleYear, setVisibleYear] = useState(today.getFullYear());
+  const [pickerMonth, setPickerMonth] = useState(today.getMonth());
+  const [pickerYear, setPickerYear] = useState(today.getFullYear());
 
-  // ✅ ANIMACIONES PARA GESTOS
-  const translateX = useRef(new Animated.Value(0)).current;
-  const gestureThreshold = 50; // Distancia mínima para activar el gesto
+  const weekScrollRef = useRef<ScrollView>(null);
+  const daysScrollRef = useRef<ScrollView>(null);
+
+  // ✅ COLORES DEL TEMA (mismo que el menú inferior)
+  const THEME_COLOR = '#4CAF50'; // Verde como el ícono del calendario
+  const THEME_COLOR_DARK = '#4CAF50';
 
   const mockEvents: MonitoringEvent[] = [
-    // NOVIEMBRE 2025 - DATOS CORRECTOS
     {
       id: '1',
       title: 'Calidad de Aire - Centro',
@@ -58,7 +72,7 @@ export default function CalendarView() {
       technician: 'Carlos Mendoza',
       matrix: 'aire',
       priority: 'high',
-      status: 'scheduled',
+      status: 'completed',
       location: 'Plaza de Armas, Lima'
     },
     {
@@ -70,98 +84,158 @@ export default function CalendarView() {
       technician: 'Ana García',
       matrix: 'agua',
       priority: 'medium',
-      status: 'in-progress',
+      status: 'completed',
       location: 'Río Rímac'
     },
-    // SÁBADOS NOVIEMBRE: 1, 8, 15, 22, 29
     {
-      id: '3',
-      title: 'Análisis de Suelo',
-      date: '2025-11-01', // SÁBADO
+      id: '10',
+      title: 'Monitoreo de Calidad de Agua - Urgente',
+      date: '2025-11-19',
       startTime: '09:00',
-      endTime: '13:00',
+      endTime: '12:00',
+      technician: 'María López',
+      matrix: 'agua',
+      priority: 'high',
+      status: 'in-progress',
+      location: 'Río Chillón'
+    },
+    {
+      id: '11',
+      title: 'Inspección de Ruido Industrial',
+      date: '2025-11-19',
+      startTime: '14:00',
+      endTime: '17:00',
       technician: 'Carlos Mendoza',
-      matrix: 'suelo',
+      matrix: 'ruido',
       priority: 'medium',
       status: 'scheduled',
-      location: 'San Isidro'
+      location: 'Zona Industrial Ate'
     },
     {
-      id: '4',
-      title: 'Medición de Ruido',
-      date: '2025-11-08', // SÁBADO
-      startTime: '10:00',
-      endTime: '12:00',
-      technician: 'Ana García',
-      matrix: 'ruido',
-      priority: 'low',
-      status: 'scheduled',
-      location: 'Miraflores'
-    },
-    {
-      id: '5',
-      title: 'Calidad de Aire - Surco',
-      date: '2025-11-15', // SÁBADO
-      startTime: '08:00',
-      endTime: '14:00',
+      id: '12',
+      title: 'Análisis de Suelo Agrícola',
+      date: '2025-11-20',
+      startTime: '07:00',
+      endTime: '13:00',
       technician: 'Luis Torres',
-      matrix: 'aire',
+      matrix: 'suelo',
       priority: 'high',
       status: 'scheduled',
-      location: 'Surco'
+      location: 'Valle de Lurín'
     },
-    // Más eventos para la semana actual
     {
-      id: '6',
-      title: 'Monitoreo de Agua - Río',
-      date: '2025-11-03', // LUNES
-      startTime: '07:00',
+      id: '13',
+      title: 'Medición de Calidad de Aire',
+      date: '2025-11-20',
+      startTime: '15:00',
+      endTime: '18:00',
+      technician: 'Ana García',
+      matrix: 'aire',
+      priority: 'medium',
+      status: 'scheduled',
+      location: 'San Juan de Lurigancho'
+    },
+    {
+      id: '14',
+      title: 'Monitoreo Integral - Agua y Suelo',
+      date: '2025-11-21',
+      startTime: '08:00',
+      endTime: '16:00',
+      technician: 'María López',
+      matrix: 'agua',
+      priority: 'high',
+      status: 'scheduled',
+      location: 'Planta Tratamiento La Chira'
+    },
+    {
+      id: '15',
+      title: 'Evaluación de Ruido Ambiental',
+      date: '2025-11-22',
+      startTime: '09:00',
+      endTime: '14:00',
+      technician: 'Carlos Mendoza',
+      matrix: 'ruido',
+      priority: 'medium',
+      status: 'scheduled',
+      location: 'Centro Comercial Jockey Plaza',
+      isOvertime: true
+    },
+    {
+      id: '16',
+      title: 'Calidad de Aire - Weekend',
+      date: '2025-11-22',
+      startTime: '10:00',
+      endTime: '13:00',
+      technician: 'Ana García',
+      matrix: 'aire',
+      priority: 'low',
+      status: 'scheduled',
+      location: 'Parque Kennedy',
+      isOvertime: true
+    },
+    {
+      id: '17',
+      title: 'Monitoreo Especial - Domingo',
+      date: '2025-11-23',
+      startTime: '08:00',
       endTime: '12:00',
       technician: 'Luis Torres',
       matrix: 'agua',
       priority: 'high',
       status: 'scheduled',
-      location: 'Río Rímac'
+      location: 'Playa Costa Verde',
+      isOvertime: true
     },
     {
-      id: '7',
-      title: 'Análisis de Suelo Industrial',
-      date: '2025-11-04', // MARTES
+      id: '18',
+      title: 'Análisis de Suelo Contaminado',
+      date: '2025-11-25',
       startTime: '06:00',
       endTime: '14:00',
       technician: 'María López',
       matrix: 'suelo',
       priority: 'high',
       status: 'scheduled',
-      location: 'Zona Industrial'
+      location: 'Exzona Industrial Callao'
     },
     {
-      id: '8',
-      title: 'Ruido Ambiental',
-      date: '2025-11-06', // JUEVES
-      startTime: '15:00',
-      endTime: '18:00',
-      technician: 'Carlos Mendoza',
-      matrix: 'ruido',
-      priority: 'medium',
-      status: 'scheduled',
-      location: 'Centro de Lima'
-    },
-    {
-      id: '9',
-      title: 'Calidad de Aire - Mañana',
-      date: '2025-11-07', // VIERNES
-      startTime: '06:30',
-      endTime: '11:30',
+      id: '19',
+      title: 'Medición de Calidad de Aire - PM2.5',
+      date: '2025-11-26',
+      startTime: '07:00',
+      endTime: '11:00',
       technician: 'Ana García',
       matrix: 'aire',
       priority: 'high',
       status: 'scheduled',
-      location: 'San Borja'
-    }
+      location: 'Av. Abancay - Centro Lima'
+    },
+    {
+      id: '20',
+      title: 'Evaluación Acústica Nocturna',
+      date: '2025-11-26',
+      startTime: '20:00',
+      endTime: '23:00',
+      technician: 'Carlos Mendoza',
+      matrix: 'ruido',
+      priority: 'medium',
+      status: 'scheduled',
+      location: 'Barranco - Zona Turística'
+    },
+    {
+      id: '21',
+      title: 'Monitoreo de Agua Potable',
+      date: '2025-11-27',
+      startTime: '09:00',
+      endTime: '15:00',
+      technician: 'Luis Torres',
+      matrix: 'agua',
+      priority: 'high',
+      status: 'scheduled',
+      location: 'Planta Huachipa'
+    },
   ];
 
-  // ✅ CONFIGURACIÓN DE MATRICES ESTILO APPLE
   const matrixConfig = {
     aire: { 
       color: '#007AFF', 
@@ -189,13 +263,11 @@ export default function CalendarView() {
     }
   };
 
-  // ✅ FUNCIONES DE UTILIDAD
   const monthNames = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
   ];
 
-  // ✅ ORDEN ESTÁNDAR (como Google Calendar, iOS)
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   const dayNamesShort = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
 
@@ -223,11 +295,56 @@ export default function CalendarView() {
     return date.getDay() === 6;
   };
 
-  // ✅ GENERAR DÍAS DE LA SEMANA ACTUAL
+  // ✅ SINCRONIZAR VISTA SEMANA AL CAMBIAR selectedDate
+  useEffect(() => {
+    if (viewMode === 'week' && daysScrollRef.current && weekScrollRef.current) {
+      const dayIndex = extendedDays.findIndex(date => isSameDate(date, selectedDate));
+      
+      if (dayIndex !== -1) {
+        const scrollPosition = dayIndex * DAY_COLUMN_WIDTH;
+        
+        setTimeout(() => {
+          daysScrollRef.current?.scrollTo({
+            x: scrollPosition,
+            animated: true
+          });
+          
+          weekScrollRef.current?.scrollTo({
+            x: scrollPosition,
+            animated: true
+          });
+        }, 100);
+      }
+    }
+  }, [viewMode, selectedDate]);
+
+  const generateExtendedWeeks = (weeksCount: number = 20) => {
+    const allDays: Date[] = [];
+    const startOffset = -Math.floor(weeksCount / 2);
+    
+    for (let weekOffset = startOffset; weekOffset < startOffset + weeksCount; weekOffset++) {
+      const referenceDate = new Date(currentDate);
+      referenceDate.setDate(currentDate.getDate() + (weekOffset * 7));
+      
+      const startOfWeek = new Date(referenceDate);
+      const day = startOfWeek.getDay();
+      const diff = startOfWeek.getDate() - day;
+      startOfWeek.setDate(diff);
+
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(startOfWeek);
+        date.setDate(startOfWeek.getDate() + i);
+        allDays.push(date);
+      }
+    }
+    
+    return allDays;
+  };
+
   const generateWeekDays = () => {
     const startOfWeek = new Date(currentDate);
     const day = startOfWeek.getDay();
-    const diff = startOfWeek.getDate() - day; // Restar para llegar al domingo
+    const diff = startOfWeek.getDate() - day;
     startOfWeek.setDate(diff);
 
     const weekDays = [];
@@ -239,62 +356,39 @@ export default function CalendarView() {
     return weekDays;
   };
 
-  // ✅ FUNCIÓN COMPLETAMENTE REDISEÑADA
   const generateCalendarDays = () => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
     
-    console.log(`🗓️ GENERANDO CALENDARIO PARA: ${monthNames[month]} ${year}`);
-    
-    // Primer día del mes
     const firstDayOfMonth = new Date(year, month, 1);
-    const startDay = firstDayOfMonth.getDay(); // 0 = domingo, 6 = sábado
+    const startDay = firstDayOfMonth.getDay();
     
-    // Último día del mes
     const lastDayOfMonth = new Date(year, month + 1, 0);
     const daysInMonth = lastDayOfMonth.getDate();
     
-    console.log(`📅 Primer día: ${firstDayOfMonth.toDateString()} (día semana: ${startDay})`);
-    console.log(`📅 Días en el mes: ${daysInMonth}`);
-    
     const calendarDays: Date[] = [];
     
-    // ✅ DÍAS DEL MES ANTERIOR (para llenar la primera semana)
     for (let i = startDay - 1; i >= 0; i--) {
       const prevMonthDay = new Date(year, month - 1, new Date(year, month, 0).getDate() - i);
       calendarDays.push(prevMonthDay);
-      console.log(`⬅️ Mes anterior: ${prevMonthDay.getDate()}/${prevMonthDay.getMonth() + 1} (${prevMonthDay.toDateString()})`);
     }
     
-    // ✅ DÍAS DEL MES ACTUAL
     for (let day = 1; day <= daysInMonth; day++) {
       const currentDay = new Date(year, month, day);
       calendarDays.push(currentDay);
-      
-      if (currentDay.getDay() === 6) { // Es sábado
-        console.log(`🔵 SÁBADO: ${day}/${month + 1} en posición ${calendarDays.length - 1}`);
-      }
-      if (currentDay.getDay() === 0) { // Es domingo
-        console.log(`🟣 DOMINGO: ${day}/${month + 1} en posición ${calendarDays.length - 1}`);
-      }
     }
     
-    // ✅ DÍAS DEL MES SIGUIENTE (para completar 6 semanas)
     const totalDays = calendarDays.length;
-    const remainingDays = 42 - totalDays; // 6 semanas × 7 días = 42
+    const remainingDays = 42 - totalDays;
     
     for (let day = 1; day <= remainingDays; day++) {
       const nextMonthDay = new Date(year, month + 1, day);
       calendarDays.push(nextMonthDay);
-      console.log(`➡️ Mes siguiente: ${nextMonthDay.getDate()}/${nextMonthDay.getMonth() + 1} (${nextMonthDay.toDateString()})`);
     }
-    
-    console.log(`📊 TOTAL DÍAS GENERADOS: ${calendarDays.length}`);
     
     return calendarDays;
   };
 
-  // ✅ NAVEGACIÓN DE MESES/SEMANAS
   const goToPrevious = () => {
     if (viewMode === 'month') {
       setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
@@ -319,73 +413,55 @@ export default function CalendarView() {
     const today = new Date();
     setCurrentDate(today);
     setSelectedDate(today);
-  };
-
-  // ✅ CONFIGURACIÓN DE GESTOS CON PanResponder
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (evt, gestureState) => {
-        // Solo activar si el movimiento es principalmente horizontal
-        return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 10;
-      },
-      onPanResponderGrant: () => {
-        translateX.setOffset(translateX._value);
-      },
-      onPanResponderMove: (evt, gestureState) => {
-        // Limitar el movimiento para que no sea excesivo
-        const limitedDx = Math.max(-100, Math.min(100, gestureState.dx));
-        translateX.setValue(limitedDx);
-      },
-      onPanResponderRelease: (evt, gestureState) => {
-        translateX.flattenOffset();
+    setVisibleMonth(today.getMonth());
+    setVisibleYear(today.getFullYear());
+    
+    if (viewMode === 'week') {
+      const todayIndex = extendedDays.findIndex(date => isSameDate(date, today));
+      
+      if (todayIndex !== -1 && daysScrollRef.current && weekScrollRef.current) {
+        const scrollPosition = todayIndex * DAY_COLUMN_WIDTH;
         
-        // Determinar dirección y activar navegación
-        if (Math.abs(gestureState.dx) > gestureThreshold) {
-          if (gestureState.dx > 0) {
-            // Swipe derecha = mes/semana anterior
-            goToPrevious();
-          } else {
-            // Swipe izquierda = mes/semana siguiente
-            goToNext();
-          }
-        }
+        daysScrollRef.current.scrollTo({
+          x: scrollPosition,
+          animated: true
+        });
         
-        // Resetear animación
-        Animated.spring(translateX, {
-          toValue: 0,
-          tension: 100,
-          friction: 8,
-          useNativeDriver: false,
-        }).start();
-      },
-    })
-  ).current;
-
-  // ✅ FUNCIONES DE EVENTOS
-  const getPriorityColor = (priority: string) => {
-    switch (priority) {
-      case 'high': return '#EF4444';
-      case 'medium': return '#F59E0B';
-      case 'low': return '#10B981';
-      default: return '#6B7280';
+        weekScrollRef.current.scrollTo({
+          x: scrollPosition,
+          animated: true
+        });
+      }
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'completed': return 'checkmark-circle';
-      case 'in-progress': return 'time';
-      case 'scheduled': return 'calendar-outline';
-      case 'cancelled': return 'close-circle';
-      default: return 'calendar-outline';
-    }
+  // ✅ ABRIR PICKER DE MES/AÑO
+  const openMonthPicker = () => {
+    setPickerMonth(viewMode === 'month' ? currentDate.getMonth() : visibleMonth);
+    setPickerYear(viewMode === 'month' ? currentDate.getFullYear() : visibleYear);
+    setShowMonthPicker(true);
   };
+
+  // ✅ APLICAR SELECCIÓN DE MES/AÑO
+  const applyMonthYearSelection = () => {
+    const newDate = new Date(pickerYear, pickerMonth, 1);
+    setCurrentDate(newDate);
+    setVisibleMonth(pickerMonth);
+    setVisibleYear(pickerYear);
+    setShowMonthPicker(false);
+  };
+
+  // ✅ BÚSQUEDA DE EVENTOS
+  const filteredEvents = mockEvents.filter(event => 
+    event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    event.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    event.technician.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const getEventsForDate = (date: Date) => {
     const dateStr = formatDateString(date);
     let events = mockEvents.filter(event => event.date === dateStr);
     
-    // Aplicar filtro de matriz
     if (matrixFilter !== 'all') {
       events = events.filter(event => event.matrix === matrixFilter);
     }
@@ -405,12 +481,10 @@ export default function CalendarView() {
     setShowCreateModal(false);
   };
 
-  // ✅ GENERAR HORAS PARA VISTA SEMANAL MEJORADA
-  const generateHours = () => {
+  const generateAllHours = () => {
     const hours = [];
-    // Mostrar solo horario laboral relevante (6 AM - 10 PM)
-    for (let i = 6; i <= 22; i++) {
-      const hour12 = i > 12 ? i - 12 : i === 0 ? 12 : i;
+    for (let i = 0; i <= 23; i++) {
+      const hour12 = i === 0 ? 12 : i > 12 ? i - 12 : i;
       const ampm = i >= 12 ? 'p. m.' : 'a. m.';
       
       if (i === 12) {
@@ -426,65 +500,96 @@ export default function CalendarView() {
     return hours;
   };
 
-  // ✅ CALCULAR POSICIÓN Y ALTURA DE EVENTOS
   const calculateEventLayout = (event: MonitoringEvent) => {
     const startHour = parseInt(event.startTime.split(':')[0]);
     const startMinutes = parseInt(event.startTime.split(':')[1]);
     const endHour = parseInt(event.endTime.split(':')[0]);
     const endMinutes = parseInt(event.endTime.split(':')[1]);
     
-    const startPosition = ((startHour - 6) * 60 + startMinutes); // Offset desde 6 AM
+    const startPosition = (startHour * 60 + startMinutes);
     const duration = (endHour - startHour) * 60 + (endMinutes - startMinutes);
     
     return {
       top: startPosition,
-      height: Math.max(duration, 30), // Mínimo 30 minutos de altura
+      height: Math.max(duration, 30),
       duration: duration
     };
   };
 
+  const handleDaysScroll = (event: any) => {
+    const scrollX = event.nativeEvent.contentOffset.x;
+    const dayIndex = Math.round(scrollX / DAY_COLUMN_WIDTH);
+    
+    if (extendedDays[dayIndex]) {
+      const visibleDate = extendedDays[dayIndex];
+      setVisibleMonth(visibleDate.getMonth());
+      setVisibleYear(visibleDate.getFullYear());
+    }
+    
+    if (weekScrollRef.current) {
+      weekScrollRef.current.scrollTo({
+        x: scrollX,
+        animated: false
+      });
+    }
+  };
+
   const calendarDays = generateCalendarDays();
   const weekDays = generateWeekDays();
+  const extendedDays = generateExtendedWeeks(20);
   const selectedDateEvents = getEventsForDate(selectedDate);
   const currentMonth = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
-  const hours = generateHours();
+  const allHours = generateAllHours();
 
-  // ✅ CALCULAR ANCHO EXACTO DE CELDA
-  const containerPadding = 32; // 16 * 2
-  const gridPadding = 16; // 8 * 2
+  const containerPadding = 32;
+  const gridPadding = 16;
   const availableWidth = screenWidth - containerPadding - gridPadding;
   const cellWidth = Math.floor(availableWidth / 7);
+  const DAY_COLUMN_WIDTH = 100;
 
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
-      {/* HEADER ESTILO APPLE */}
+      {/* HEADER */}
       <View style={[styles.header, isDark && styles.headerDark]}>
         <View style={{ height: Platform.OS === 'ios' ? 50 : StatusBar.currentHeight || 40 }} />
         
         <View style={styles.headerContent}>
-          <TouchableOpacity onPress={goToPrevious} style={styles.navButton}>
-            <Ionicons name="chevron-back" size={24} color={isDark ? '#007AFF' : '#007AFF'} />
+          {/* ✅ SIN FLECHA - Solo navegación con botones o título */}
+          <View style={{ width: 44 }} />
+          
+          {/* ✅ TÍTULO TÁCTIL PARA ABRIR PICKER */}
+          <TouchableOpacity onPress={openMonthPicker} style={styles.monthYearContainer}>
+            <Text style={[styles.monthYear, isDark && styles.monthYearDark]}>
+              {viewMode === 'month' 
+                ? `${monthNames[currentMonth]} ${currentYear}`
+                : `${monthNames[visibleMonth]} ${visibleYear}`
+              }
+            </Text>
+            <Ionicons 
+              name="chevron-down" 
+              size={24} 
+              color={isDark ? '#FFFFFF' : '#000000'} 
+              style={{ marginLeft: 8 }}
+            />
           </TouchableOpacity>
           
-          <Text style={[styles.monthYear, isDark && styles.monthYearDark]}>
-            {viewMode === 'month' 
-              ? `${monthNames[currentMonth]} ${currentYear}`
-              : `${monthNames[weekDays[0].getMonth()]} ${weekDays[0].getFullYear()}`
-            }
-          </Text>
-          
           <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.headerActionButton}>
+            {/* ✅ LUPA FUNCIONAL */}
+            <TouchableOpacity 
+              style={styles.headerActionButton}
+              onPress={() => setShowSearchModal(true)}
+            >
               <Ionicons name="search-outline" size={22} color={isDark ? '#8E8E93' : '#8E8E93'} />
             </TouchableOpacity>
+            
+            {/* ✅ BOTÓN + CON COLOR DEL TEMA */}
             <TouchableOpacity style={styles.headerActionButton} onPress={openCreateModal}>
-              <Ionicons name="add" size={22} color={isDark ? '#007AFF' : '#007AFF'} />
+              <Ionicons name="add" size={22} color={isDark ? THEME_COLOR_DARK : THEME_COLOR} />
             </TouchableOpacity>
           </View>
         </View>
         
-        {/* SUBTITLE SOLO EN VISTA MES */}
         {viewMode === 'month' && (
           <View style={styles.subtitleContainer}>
             <Text style={[styles.subtitle, isDark && styles.subtitleDark]}>
@@ -494,9 +599,8 @@ export default function CalendarView() {
         )}
       </View>
 
-      {/* CONTROLES DE VISTA Y FILTROS ESTILO APPLE */}
+      {/* CONTROLES */}
       <View style={[styles.controlsContainer, isDark && styles.controlsContainerDark]}>
-        {/* SELECTOR DE VISTA */}
         <View style={styles.viewControls}>
           <View style={[styles.viewSelector, isDark && styles.viewSelectorDark]}>
             <TouchableOpacity
@@ -534,12 +638,18 @@ export default function CalendarView() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={[styles.todayButton, isDark && styles.todayButtonDark]} onPress={goToToday}>
-            <Text style={[styles.todayButtonText, isDark && styles.todayButtonTextDark]}>Hoy</Text>
+          {/* ✅ BOTÓN HOY CON COLOR DEL TEMA */}
+          <TouchableOpacity 
+            style={[
+              styles.todayButton, 
+              { backgroundColor: isDark ? THEME_COLOR_DARK : THEME_COLOR }
+            ]} 
+            onPress={goToToday}
+          >
+            <Text style={styles.todayButtonText}>Hoy</Text>
           </TouchableOpacity>
         </View>
 
-        {/* FILTROS DE MATRIZ ESTILO APPLE */}
         <ScrollView 
           horizontal 
           showsHorizontalScrollIndicator={false}
@@ -597,233 +707,87 @@ export default function CalendarView() {
         </ScrollView>
       </View>
 
-      {/* CONTENIDO CON GESTOS ACTIVADOS */}
-      <Animated.View 
-        style={[
-          styles.content, 
-          { 
-            transform: [{ translateX }],
-            opacity: translateX.interpolate({
-              inputRange: [-100, 0, 100],
-              outputRange: [0.7, 1, 0.7],
-              extrapolate: 'clamp',
-            })
-          }
-        ]}
-        {...panResponder.panHandlers}
-      >
-        <ScrollView showsVerticalScrollIndicator={false}>
-          {viewMode === 'month' ? (
-            <>
-              {/* DÍAS DE LA SEMANA */}
-              <View style={styles.weekDays}>
-                {dayNames.map((day) => (
-                  <View key={day} style={{ width: cellWidth }}>
-                    <Text style={[
-                      styles.weekDay, 
-                      isDark && styles.weekDayDark,
-                      day === 'Dom' && (isDark ? styles.weekDaySundayDark : styles.weekDaySunday),
-                      day === 'Sáb' && (isDark ? styles.weekDaySaturdayDark : styles.weekDaySaturday)
-                    ]}>
-                      {day}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-
-              {/* GRID DE DÍAS CON SOLO COLORES EN NÚMEROS */}
-              <View style={[styles.daysGrid, isDark && styles.daysGridDark]}>
-                {calendarDays.map((date, index) => {
-                  const dayOfMonth = date.getDate();
-                  const isCurrentMonth = date.getMonth() === currentMonth;
-                  const isSelected = isSameDate(date, selectedDate);
-                  const isTodayDate = isToday(date);
-                  const dayEvents = getEventsForDate(date);
-                  
-                  // ✅ DETERMINAR SI ES SÁBADO O DOMINGO BASADO EN getDay()
-                  const isSaturdayDay = date.getDay() === 6;
-                  const isSundayDay = date.getDay() === 0;
-
-                  return (
-                    <TouchableOpacity
-                      key={`day-${index}-${dayOfMonth}-${date.getMonth()}-${date.getFullYear()}`}
-                      style={[
-                        styles.dayCell,
-                        { width: cellWidth },
-                        isSelected && (isDark ? styles.selectedDayDark : styles.selectedDay),
-                      ]}
-                      onPress={() => setSelectedDate(new Date(date))}
-                    >
-                      <View style={[
-                        styles.dayNumberContainer,
-                        isTodayDate && (isDark ? styles.todayCircleDark : styles.todayCircle)
-                      ]}>
-                        <Text style={[
-                          styles.dayNumber,
-                          isDark && styles.dayNumberDark,
-                          isSelected && styles.selectedDayText,
-                          isTodayDate && styles.todayDayText,
-                          // ✅ SOLO COLORES EN TEXTO - SIN CUADROS
-                          isSaturdayDay && isCurrentMonth && (isDark ? styles.saturdayDayTextDark : styles.saturdayDayText),
-                          isSundayDay && isCurrentMonth && (isDark ? styles.sundayDayTextDark : styles.sundayDayText),
-                          !isCurrentMonth && styles.otherMonthText,
-                        ]}>
-                          {dayOfMonth}
-                        </Text>
-                      </View>
-
-                      {/* EVENTOS */}
-                      {hasEvents(date) && (
-                        <View style={styles.eventIndicators}>
-                          {dayEvents.slice(0, 3).map((event, idx) => (
-                            <View
-                              key={`${event.id}-${idx}`}
-                              style={[
-                                styles.eventDot,
-                                { backgroundColor: isDark ? matrixConfig[event.matrix].darkColor : matrixConfig[event.matrix].color }
-                              ]}
-                            />
-                          ))}
-                        </View>
-                      )}
-                      
-                      {/* INDICADOR DOMINGO SIN EVENTOS */}
-                      {isSundayDay && isCurrentMonth && !hasEvents(date) && (
-                        <View style={styles.sundayIndicator}>
-                          <Ionicons name="time-outline" size={10} color={isDark ? "#BF5AF2" : "#8E4EC6"} />
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </>
-          ) : (
-            /* ✅ VISTA DE SEMANA MEJORADA ESTILO APPLE */
-            <View style={[styles.weekContainer, isDark && styles.weekContainerDark]}>
-              {/* ENCABEZADOS DE DÍAS */}
-              <View style={[styles.weekHeader, isDark && styles.weekHeaderDark]}>
-                <View style={styles.timeColumnHeader} />
-                {weekDays.map((date, index) => {
-                  const isTodayDate = isToday(date);
-                  const isSelectedDate = isSameDate(date, selectedDate);
-                  const isSaturdayDay = date.getDay() === 6;
-                  const isSundayDay = date.getDay() === 0;
-                  
-                  return (
-                    <TouchableOpacity 
-                      key={index} 
-                      style={styles.dayColumnHeader}
-                      onPress={() => setSelectedDate(new Date(date))}
-                    >
-                      <Text style={[
-                        styles.weekDayLabel,
-                        isDark && styles.weekDayLabelDark,
-                        isSundayDay && (isDark ? styles.weekDaySundayDark : styles.weekDaySunday),
-                        isSaturdayDay && (isDark ? styles.weekDaySaturdayDark : styles.weekDaySaturday)
-                      ]}>
-                        {dayNamesShort[date.getDay()]}
-                      </Text>
-                      <View style={[
-                        styles.weekDayNumber,
-                        isTodayDate && (isDark ? styles.todayCircleDark : styles.todayCircle),
-                        isSelectedDate && !isTodayDate && (isDark ? styles.selectedCircleDark : styles.selectedCircle)
-                      ]}>
-                        <Text style={[
-                          styles.weekDayNumberText,
-                          isDark && styles.weekDayNumberTextDark,
-                          (isTodayDate || isSelectedDate) && styles.weekDayNumberTextActive
-                        ]}>
-                          {date.getDate()}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              {/* GRILLA DE HORAS CON EVENTOS POSICIONADOS */}
-              <ScrollView style={styles.weekGrid} showsVerticalScrollIndicator={false}>
-                <View style={styles.weekContent}>
-                  {/* LÍNEAS DE TIEMPO */}
-                  <View style={styles.timeLinesContainer}>
-                    {hours.map((timeSlot, hourIndex) => (
-                      <View key={timeSlot.hour24} style={[styles.timeSlot, isDark && styles.timeSlotDark]}>
-                        <View style={styles.timeColumn}>
-                          <Text style={[styles.hourLabel, isDark && styles.hourLabelDark]}>
-                            {timeSlot.short}
-                          </Text>
-                        </View>
-                        <View style={[styles.timeLine, isDark && styles.timeLineDark]} />
-                      </View>
-                    ))}
-                  </View>
-
-                  {/* EVENTOS POSICIONADOS ABSOLUTAMENTE */}
-                  <View style={styles.eventsContainer}>
-                    {weekDays.map((date, dayIndex) => {
-                      const dayEvents = getEventsForDate(date);
-                      const dayWidth = (screenWidth - 32 - 60) / 7; // Ancho disponible dividido por 7 días
-                      
-                      return (
-                        <View 
-                          key={dayIndex} 
-                          style={[
-                            styles.dayEventsColumn,
-                            { 
-                              left: 60 + (dayIndex * dayWidth),
-                              width: dayWidth - 2
-                            }
-                          ]}
-                        >
-                          {dayEvents.map((event) => {
-                            const layout = calculateEventLayout(event);
-                            
-                            return (
-                              <TouchableOpacity
-                                key={event.id}
-                                style={[
-                                  styles.weekEventCard,
-                                  {
-                                    top: layout.top,
-                                    height: layout.height,
-                                    backgroundColor: isDark 
-                                      ? matrixConfig[event.matrix].darkColor 
-                                      : matrixConfig[event.matrix].color,
-                                  }
-                                ]}
-                              >
-                                <Text style={styles.weekEventCardTitle} numberOfLines={2}>
-                                  {event.title}
-                                </Text>
-                                <Text style={styles.weekEventCardTime}>
-                                  {event.startTime} - {event.endTime}
-                                </Text>
-                                <Text style={styles.weekEventCardLocation} numberOfLines={1}>
-                                  📍 {event.location}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      );
-                    })}
-                  </View>
-
-                  {/* LÍNEA DE TIEMPO ACTUAL */}
-                  {weekDays.some(date => isToday(date)) && (
-                    <View style={[styles.currentTimeLine, isDark && styles.currentTimeLineDark]}>
-                      <View style={[styles.currentTimeDot, isDark && styles.currentTimeDotDark]} />
-                      <View style={[styles.currentTimeLineBar, isDark && styles.currentTimeLineBarDark]} />
-                    </View>
-                  )}
+      {/* CONTENIDO */}
+      <View style={styles.content}>
+        {viewMode === 'month' ? (
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={styles.weekDays}>
+              {dayNames.map((day) => (
+                <View key={day} style={{ width: cellWidth }}>
+                  <Text style={[
+                    styles.weekDay, 
+                    isDark && styles.weekDayDark,
+                    day === 'Dom' && (isDark ? styles.weekDaySundayDark : styles.weekDaySunday),
+                    day === 'Sáb' && (isDark ? styles.weekDaySaturdayDark : styles.weekDaySaturday)
+                  ]}>
+                    {day}
+                  </Text>
                 </View>
-              </ScrollView>
+              ))}
             </View>
-          )}
 
-          {/* EVENTOS DEL DÍA SELECCIONADO (solo en vista mes) */}
-          {viewMode === 'month' && (
+            <View style={[styles.daysGrid, isDark && styles.daysGridDark]}>
+              {calendarDays.map((date, index) => {
+                const dayOfMonth = date.getDate();
+                const isCurrentMonth = date.getMonth() === currentMonth;
+                const isSelected = isSameDate(date, selectedDate);
+                const isTodayDate = isToday(date);
+                const dayEvents = getEventsForDate(date);
+                
+                const isSaturdayDay = date.getDay() === 6;
+                const isSundayDay = date.getDay() === 0;
+
+                return (
+                  <TouchableOpacity
+                    key={`day-${index}-${dayOfMonth}-${date.getMonth()}-${date.getFullYear()}`}
+                    style={[
+                      styles.dayCell,
+                      { width: cellWidth },
+                      isSelected && (isDark ? styles.selectedDayDark : styles.selectedDay),
+                    ]}
+                    onPress={() => setSelectedDate(new Date(date))}
+                  >
+                    <View style={[
+                      styles.dayNumberContainer,
+                      isTodayDate && (isDark ? styles.todayCircleDark : styles.todayCircle)
+                    ]}>
+                      <Text style={[
+                        styles.dayNumber,
+                        isDark && styles.dayNumberDark,
+                        isSelected && styles.selectedDayText,
+                        isTodayDate && styles.todayDayText,
+                        isSaturdayDay && isCurrentMonth && (isDark ? styles.saturdayDayTextDark : styles.saturdayDayText),
+                        isSundayDay && isCurrentMonth && (isDark ? styles.sundayDayTextDark : styles.sundayDayText),
+                        !isCurrentMonth && styles.otherMonthText,
+                      ]}>
+                        {dayOfMonth}
+                      </Text>
+                    </View>
+
+                    {hasEvents(date) && (
+                      <View style={styles.eventIndicators}>
+                        {dayEvents.slice(0, 3).map((event, idx) => (
+                          <View
+                            key={`${event.id}-${idx}`}
+                            style={[
+                              styles.eventDot,
+                              { backgroundColor: isDark ? matrixConfig[event.matrix].darkColor : matrixConfig[event.matrix].color }
+                            ]}
+                          />
+                        ))}
+                      </View>
+                    )}
+                    
+                    {isSundayDay && isCurrentMonth && !hasEvents(date) && (
+                      <View style={styles.sundayIndicator}>
+                        <Ionicons name="time-outline" size={10} color={isDark ? "#BF5AF2" : "#8E4EC6"} />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
             <View style={[styles.dayEvents, isDark && styles.dayEventsDark]}>
               <View style={styles.dayEventsHeader}>
                 <Text style={[styles.dayEventsTitle, isDark && styles.dayEventsTitleDark]}>
@@ -912,9 +876,242 @@ export default function CalendarView() {
                 </View>
               )}
             </View>
-          )}
-        </ScrollView>
-      </Animated.View>
+          </ScrollView>
+        ) : (
+          <View style={[styles.weekViewContainer, isDark && styles.weekViewContainerDark]}>
+            <View style={[styles.weekHeaderFixed, isDark && styles.weekHeaderFixedDark]}>
+              <View style={[styles.timeHeaderCorner, isDark && styles.timeHeaderCornerDark]} />
+              <ScrollView
+                ref={weekScrollRef}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                scrollEventThrottle={16}
+                scrollEnabled={false}
+              >
+                {extendedDays.map((date, index) => {
+                  const isTodayDate = isToday(date);
+                  const isSelectedDate = isSameDate(date, selectedDate);
+                  const isSaturdayDay = date.getDay() === 6;
+                  const isSundayDay = date.getDay() === 0;
+                  
+                  return (
+                    <TouchableOpacity
+                      key={`header-${index}-${date.getTime()}`}
+                      style={[styles.dayHeaderColumn, { width: DAY_COLUMN_WIDTH }]}
+                      onPress={() => setSelectedDate(new Date(date))}
+                    >
+                      <Text style={[
+                        styles.dayHeaderLabel,
+                        isDark && styles.dayHeaderLabelDark,
+                        isSundayDay && (isDark ? styles.weekDaySundayDark : styles.weekDaySunday),
+                        isSaturdayDay && (isDark ? styles.weekDaySaturdayDark : styles.weekDaySaturday)
+                      ]}>
+                        {dayNamesShort[date.getDay()]}
+                      </Text>
+                      <View style={[
+                        styles.dayHeaderNumber,
+                        isTodayDate && (isDark ? styles.todayCircleDark : styles.todayCircle),
+                        isSelectedDate && !isTodayDate && (isDark ? styles.selectedCircleDark : styles.selectedCircle)
+                      ]}>
+                        <Text style={[
+                          styles.dayHeaderNumberText,
+                          isDark && styles.dayHeaderNumberTextDark,
+                          (isTodayDate || isSelectedDate) && styles.dayHeaderNumberTextActive
+                        ]}>
+                          {date.getDate()}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            <ScrollView style={styles.weekScrollContainer} showsVerticalScrollIndicator={false}>
+              <View style={styles.weekGridContainer}>
+                <View style={[styles.timeColumn, isDark && styles.timeColumnDark]}>
+                  {allHours.map((hour) => (
+                    <View key={`time-${hour.hour24}`} style={styles.timeSlot}>
+                      <Text style={[styles.timeLabel, isDark && styles.timeLabelDark]}>
+                        {hour.short}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+
+                <ScrollView
+                  ref={daysScrollRef}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  scrollEventThrottle={16}
+                  onScroll={handleDaysScroll}
+                >
+                  <View style={styles.daysContainer}>
+                    {allHours.map((hour) => (
+                      <View
+                        key={`grid-${hour.hour24}`}
+                        style={[
+                          styles.gridLine,
+                          isDark && styles.gridLineDark,
+                          { width: DAY_COLUMN_WIDTH * extendedDays.length }
+                        ]}
+                      />
+                    ))}
+
+                    {extendedDays.map((date, dayIndex) => {
+                      const dayEvents = getEventsForDate(date);
+                      
+                      return (
+                        <View
+                          key={`day-${dayIndex}-${date.getTime()}`}
+                          style={[
+                            styles.dayColumn,
+                            isDark && styles.dayColumnDark,
+                            { width: DAY_COLUMN_WIDTH, left: dayIndex * DAY_COLUMN_WIDTH }
+                          ]}
+                        >
+                          {dayEvents.map((event) => {
+                            const layout = calculateEventLayout(event);
+                            
+                            return (
+                              <TouchableOpacity
+                                key={`event-${event.id}-${dayIndex}`}
+                                style={[
+                                  styles.weekEvent,
+                                  {
+                                    top: layout.top,
+                                    height: layout.height,
+                                    backgroundColor: isDark 
+                                      ? matrixConfig[event.matrix].darkColor 
+                                      : matrixConfig[event.matrix].color,
+                                  }
+                                ]}
+                              >
+                                <Text style={styles.weekEventTitle} numberOfLines={2}>
+                                  {event.title}
+                                </Text>
+                                <Text style={styles.weekEventTime}>
+                                  {event.startTime}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+              </View>
+            </ScrollView>
+          </View>
+        )}
+      </View>
+
+      {/* ✅ MODAL PICKER DE MES/AÑO */}
+      <Modal
+        visible={showMonthPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowMonthPicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.pickerContainer, isDark && styles.pickerContainerDark]}>
+            <View style={styles.pickerHeader}>
+              <TouchableOpacity onPress={() => setShowMonthPicker(false)}>
+                <Text style={[styles.pickerButton, isDark && styles.pickerButtonDark]}>Cancelar</Text>
+              </TouchableOpacity>
+              <Text style={[styles.pickerTitle, isDark && styles.pickerTitleDark]}>Seleccionar Fecha</Text>
+              <TouchableOpacity onPress={applyMonthYearSelection}>
+                <Text style={[styles.pickerButton, styles.pickerButtonDone]}>Listo</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.pickersRow}>
+              <Picker
+                selectedValue={pickerMonth}
+                style={[styles.picker, isDark && styles.pickerDark]}
+                onValueChange={(value) => setPickerMonth(value)}
+              >
+                {monthNames.map((month, index) => (
+                  <Picker.Item key={index} label={month} value={index} color={isDark ? '#FFFFFF' : '#000000'} />
+                ))}
+              </Picker>
+              
+              <Picker
+                selectedValue={pickerYear}
+                style={[styles.picker, isDark && styles.pickerDark]}
+                onValueChange={(value) => setPickerYear(value)}
+              >
+                {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i).map((year) => (
+                  <Picker.Item key={year} label={String(year)} value={year} color={isDark ? '#FFFFFF' : '#000000'} />
+                ))}
+              </Picker>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ✅ MODAL DE BÚSQUEDA */}
+      <Modal
+        visible={showSearchModal}
+        animationType="slide"
+        onRequestClose={() => setShowSearchModal(false)}
+      >
+        <View style={[styles.searchContainer, isDark && styles.searchContainerDark]}>
+          <View style={[styles.searchHeader, isDark && styles.searchHeaderDark]}>
+            <View style={[styles.searchInputContainer, isDark && styles.searchInputContainerDark]}>
+              <Ionicons name="search" size={20} color="#8E8E93" style={{ marginRight: 8 }} />
+              <TextInput
+                style={[styles.searchInput, isDark && styles.searchInputDark]}
+                placeholder="Buscar eventos..."
+                placeholderTextColor="#8E8E93"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoFocus
+              />
+            </View>
+            <TouchableOpacity onPress={() => { setShowSearchModal(false); setSearchQuery(''); }}>
+              <Text style={[styles.cancelButton, { color: isDark ? THEME_COLOR_DARK : THEME_COLOR }]}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView style={styles.searchResults}>
+            {filteredEvents.length > 0 ? (
+              filteredEvents.map((event) => (
+                <TouchableOpacity
+                  key={event.id}
+                  style={[styles.searchResultItem, isDark && styles.searchResultItemDark]}
+                  onPress={() => {
+                    const eventDate = new Date(event.date);
+                    setSelectedDate(eventDate);
+                    setCurrentDate(eventDate);
+                    setShowSearchModal(false);
+                    setSearchQuery('');
+                  }}
+                >
+                  <View style={[styles.searchResultBar, { backgroundColor: isDark ? matrixConfig[event.matrix].darkColor : matrixConfig[event.matrix].color }]} />
+                  <View style={styles.searchResultContent}>
+                    <Text style={[styles.searchResultTitle, isDark && styles.searchResultTitleDark]}>{event.title}</Text>
+                    <Text style={[styles.searchResultDetails, isDark && styles.searchResultDetailsDark]}>
+                      {event.date} • {event.startTime} - {event.endTime}
+                    </Text>
+                    <Text style={[styles.searchResultLocation, isDark && styles.searchResultLocationDark]}>
+                      📍 {event.location}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ))
+            ) : (
+              <View style={styles.noSearchResults}>
+                <Ionicons name="search-outline" size={64} color="#8E8E93" />
+                <Text style={[styles.noSearchResultsText, isDark && styles.noSearchResultsTextDark]}>
+                  {searchQuery ? 'No se encontraron eventos' : 'Busca eventos por título, ubicación o técnico'}
+                </Text>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </Modal>
 
       <CreateEventModal
         isVisible={showCreateModal}
@@ -926,7 +1123,6 @@ export default function CalendarView() {
   );
 }
 
-// ✅ Los estilos permanecen exactamente iguales
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -936,7 +1132,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
   
-  // ✅ HEADER ESTILO APPLE
   header: {
     backgroundColor: '#F2F2F7',
     paddingBottom: 8,
@@ -951,23 +1146,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
-  navButton: {
-    width: 44,
-    height: 44,
-    justifyContent: 'center',
+  
+  // ✅ TÍTULO TÁCTIL
+  monthYearContainer: {
+    flex: 1,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   monthYear: {
     fontSize: 34,
     fontWeight: '700',
     color: '#000000',
-    flex: 1,
-    textAlign: 'left',
-    marginLeft: 16,
   },
   monthYearDark: {
     color: '#FFFFFF',
   },
+  
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -990,7 +1185,6 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
   },
 
-  // ✅ CONTROLES ESTILO APPLE
   controlsContainer: {
     backgroundColor: '#F2F2F7',
     paddingHorizontal: 16,
@@ -1054,22 +1248,14 @@ const styles = StyleSheet.create({
   todayButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#007AFF',
     borderRadius: 8,
-  },
-  todayButtonDark: {
-    backgroundColor: '#0A84FF',
   },
   todayButtonText: {
     color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 15,
   },
-  todayButtonTextDark: {
-    color: '#FFFFFF',
-  },
 
-  // ✅ FILTROS ESTILO APPLE
   filtersRow: {
     flexDirection: 'row',
   },
@@ -1111,13 +1297,12 @@ const styles = StyleSheet.create({
 
   content: {
     flex: 1,
-    paddingHorizontal: 16,
   },
 
-  // ✅ VISTA DE MES
   weekDays: {
     flexDirection: 'row',
     marginBottom: 8,
+    paddingHorizontal: 16,
   },
   weekDay: {
     textAlign: 'center',
@@ -1153,6 +1338,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 8,
     marginBottom: 20,
+    marginHorizontal: 16,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -1263,55 +1449,54 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  // ✅ VISTA DE SEMANA MEJORADA ESTILO APPLE
-  weekContainer: {
+  weekViewContainer: {
     flex: 1,
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 20,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
   },
-  weekContainerDark: {
-    backgroundColor: '#1C1C1E',
+  weekViewContainerDark: {
+    backgroundColor: '#000000',
   },
 
-  weekHeader: {
+  weekHeaderFixed: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#C6C6C8',
-    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
   },
-  weekHeaderDark: {
-    backgroundColor: '#1C1C1E',
+  weekHeaderFixedDark: {
+    backgroundColor: '#000000',
     borderBottomColor: '#38383A',
   },
 
-  timeColumnHeader: {
-    width: 60,
+  timeHeaderCorner: {
+    width: 70,
+    backgroundColor: '#FFFFFF',
+    borderRightWidth: 1,
+    borderRightColor: '#E5E5EA',
+  },
+  timeHeaderCornerDark: {
+    backgroundColor: '#000000',
+    borderRightColor: '#38383A',
   },
 
-  dayColumnHeader: {
-    flex: 1,
+  dayHeaderColumn: {
+    paddingVertical: 12,
     alignItems: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#E5E5EA',
   },
 
-  weekDayLabel: {
-    fontSize: 12,
+  dayHeaderLabel: {
+    fontSize: 11,
     fontWeight: '600',
     color: '#8E8E93',
     marginBottom: 4,
   },
-  weekDayLabelDark: {
+  dayHeaderLabelDark: {
     color: '#8E8E93',
   },
 
-  weekDayNumber: {
+  dayHeaderNumber: {
     width: 32,
     height: 32,
     borderRadius: 16,
@@ -1326,161 +1511,106 @@ const styles = StyleSheet.create({
     backgroundColor: '#2C2C2E',
   },
 
-  weekDayNumberText: {
+  dayHeaderNumberText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#000000',
   },
-  weekDayNumberTextDark: {
+  dayHeaderNumberTextDark: {
     color: '#FFFFFF',
   },
-  weekDayNumberTextActive: {
+  dayHeaderNumberTextActive: {
     color: '#FFFFFF',
   },
 
-  weekGrid: {
+  weekScrollContainer: {
     flex: 1,
   },
 
-  // ✅ NUEVA ESTRUCTURA PARA VISTA DE SEMANA
-  weekContent: {
-    position: 'relative',
-    height: 16 * 60, // 16 horas × 60 minutos
+  weekGridContainer: {
+    flexDirection: 'row',
   },
 
-  timeLinesContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  timeColumn: {
+    width: 70,
+    backgroundColor: '#FFFFFF',
+    borderRightWidth: 1,
+    borderRightColor: '#E5E5EA',
+  },
+  timeColumnDark: {
+    backgroundColor: '#000000',
+    borderRightColor: '#38383A',
   },
 
   timeSlot: {
     height: 60,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#F2F2F2',
-  },
-  timeSlotDark: {
-    borderBottomColor: '#38383A',
-  },
-
-  timeColumn: {
-    width: 60,
+    justifyContent: 'flex-start',
     alignItems: 'center',
     paddingTop: 4,
   },
 
-  hourLabel: {
+  timeLabel: {
     fontSize: 11,
     color: '#8E8E93',
     fontWeight: '500',
   },
-  hourLabelDark: {
+  timeLabelDark: {
     color: '#8E8E93',
   },
 
-  timeLine: {
-    flex: 1,
-    height: 0.5,
-    backgroundColor: '#F2F2F2',
-    marginTop: 8,
-  },
-  timeLineDark: {
-    backgroundColor: '#38383A',
+  daysContainer: {
+    position: 'relative',
   },
 
-  eventsContainer: {
+  gridLine: {
+    height: 60,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F2',
+  },
+  gridLineDark: {
+    borderBottomColor: '#1C1C1E',
+  },
+
+  dayColumn: {
     position: 'absolute',
     top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    height: 60 * 24,
+    borderRightWidth: 1,
+    borderRightColor: '#E5E5EA',
+  },
+  dayColumnDark: {
+    borderRightColor: '#38383A',
   },
 
-  dayEventsColumn: {
+  weekEvent: {
     position: 'absolute',
-    top: 0,
-    bottom: 0,
-  },
-
-  // ✅ EVENTOS EN VISTA SEMANAL MEJORADOS
-  weekEventCard: {
-    position: 'absolute',
-    left: 4,
-    right: 4,
-    borderRadius: 6,
-    padding: 6,
+    left: 2,
+    right: 2,
+    borderRadius: 4,
+    padding: 4,
     borderLeftWidth: 3,
-    borderLeftColor: 'rgba(255,255,255,0.4)',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    borderLeftColor: 'rgba(255,255,255,0.5)',
   },
 
-  weekEventCardTitle: {
+  weekEventTitle: {
     fontSize: 11,
     fontWeight: '700',
     color: '#FFFFFF',
     marginBottom: 2,
   },
 
-  weekEventCardTime: {
+  weekEventTime: {
     fontSize: 9,
     color: '#FFFFFF',
     opacity: 0.9,
-    marginBottom: 2,
   },
 
-  weekEventCardLocation: {
-    fontSize: 8,
-    color: '#FFFFFF',
-    opacity: 0.8,
-  },
-
-  // ✅ LÍNEA DE TIEMPO ACTUAL MEJORADA
-  currentTimeLine: {
-    position: 'absolute',
-    top: 300, // Posición aproximada de 11:00 AM
-    left: 0,
-    right: 0,
-    height: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    zIndex: 100,
-  },
-  currentTimeLineDark: {},
-  currentTimeDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#FF3B30',
-    marginLeft: 54,
-    marginRight: 6,
-  },
-  currentTimeDotDark: {
-    backgroundColor: '#FF453A',
-  },
-  currentTimeLineBar: {
-    flex: 1,
-    height: 2,
-    backgroundColor: '#FF3B30',
-    marginRight: 16,
-  },
-  currentTimeLineBarDark: {
-    backgroundColor: '#FF453A',
-  },
-
-  // ✅ EVENTOS DEL DÍA SELECCIONADO (VISTA MES)
   dayEvents: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     padding: 16,
     marginBottom: 20,
+    marginHorizontal: 16,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -1534,7 +1664,7 @@ const styles = StyleSheet.create({
     color: '#8E4EC6',
     fontWeight: '600',
   },
-  overtimeBadgeTextDark: {
+    overtimeBadgeTextDark: {
     color: '#BF5AF2',
   },
   
@@ -1654,6 +1784,176 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   noEventsSubtextDark: {
+    color: '#8E8E93',
+  },
+
+  // ✅ ESTILOS DEL MODAL PICKER
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  pickerContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+  },
+  pickerContainerDark: {
+    backgroundColor: '#1C1C1E',
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  pickerTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  pickerTitleDark: {
+    color: '#FFFFFF',
+  },
+  pickerButton: {
+    fontSize: 17,
+    color: '#007AFF',
+  },
+  pickerButtonDark: {
+    color: '#0A84FF',
+  },
+  pickerButtonDone: {
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+  pickersRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+  },
+  picker: {
+    flex: 1,
+    height: 200,
+  },
+  pickerDark: {
+    backgroundColor: '#1C1C1E',
+  },
+
+  // ✅ ESTILOS DEL MODAL DE BÚSQUEDA
+  searchContainer: {
+    flex: 1,
+    backgroundColor: '#F2F2F7',
+  },
+  searchContainerDark: {
+    backgroundColor: '#000000',
+  },
+  searchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 60 : 20,
+    paddingBottom: 12,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  searchHeaderDark: {
+    backgroundColor: '#1C1C1E',
+    borderBottomColor: '#38383A',
+  },
+  searchInputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F2F2F7',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 12,
+  },
+  searchInputContainerDark: {
+    backgroundColor: '#2C2C2E',
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 17,
+    color: '#000000',
+  },
+  searchInputDark: {
+    color: '#FFFFFF',
+  },
+  cancelButton: {
+    fontSize: 17,
+    fontWeight: '600',
+  },
+  searchResults: {
+    flex: 1,
+    paddingTop: 16,
+  },
+  searchResultItem: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  searchResultItemDark: {
+    backgroundColor: '#1C1C1E',
+  },
+  searchResultBar: {
+    width: 4,
+  },
+  searchResultContent: {
+    flex: 1,
+    padding: 12,
+  },
+  searchResultTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 4,
+  },
+  searchResultTitleDark: {
+    color: '#FFFFFF',
+  },
+  searchResultDetails: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginBottom: 4,
+  },
+  searchResultDetailsDark: {
+    color: '#8E8E93',
+  },
+  searchResultLocation: {
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  searchResultLocationDark: {
+    color: '#8E8E93',
+  },
+  noSearchResults: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 80,
+    paddingHorizontal: 40,
+  },
+  noSearchResultsText: {
+    fontSize: 16,
+    color: '#8E8E93',
+    textAlign: 'center',
+    marginTop: 16,
+  },
+  noSearchResultsTextDark: {
     color: '#8E8E93',
   },
 });
