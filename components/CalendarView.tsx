@@ -17,27 +17,20 @@ import {
 import { Picker } from '@react-native-picker/picker';
 import { CreateEventModal } from './CreateEventModal';
 
-const { width: screenWidth } = Dimensions.get('window');
+// ✅ IMPORTAR FIRESTORE Y HOOK
+import { MonitoringEvent } from '../firebase';
+import { useEvents } from '../hooks/useEvents';
 
-interface MonitoringEvent {
-  id: string;
-  title: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  technician: string;
-  matrix: 'aire' | 'agua' | 'suelo' | 'ruido';
-  priority: 'high' | 'medium' | 'low';
-  status: 'scheduled' | 'in-progress' | 'completed' | 'cancelled';
-  location: string;
-  isOvertime?: boolean;
-}
+const { width: screenWidth } = Dimensions.get('window');
 
 type MatrixFilter = 'all' | 'aire' | 'agua' | 'suelo' | 'ruido';
 
 export default function CalendarView() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  
+  // ✅ USAR DATOS REALES DE FIRESTORE
+  const { events: firestoreEvents, loading, error, createEvent } = useEvents();
   
   const today = new Date();
   const [currentDate, setCurrentDate] = useState(today);
@@ -62,7 +55,8 @@ export default function CalendarView() {
   const THEME_COLOR = '#4CAF50'; // Verde como el ícono del calendario
   const THEME_COLOR_DARK = '#4CAF50';
 
-  const mockEvents: MonitoringEvent[] = [
+  // ✅ DATOS MOCK COMO FALLBACK (solo si no hay conexión)
+  const mockEventsFallback: MonitoringEvent[] = [
     {
       id: '1',
       title: 'Calidad de Aire - Centro',
@@ -236,6 +230,48 @@ export default function CalendarView() {
     },
   ];
 
+  // ✅ USAR EVENTOS REALES O FALLBACK
+  const mockEvents = firestoreEvents.length > 0 ? firestoreEvents : mockEventsFallback;
+
+  // ✅ FUNCIÓN PARA CREAR EVENTO REAL
+  const handleCreateEvent = async (eventData: Omit<MonitoringEvent, 'id' | 'createdAt' | 'updatedAt'>) => {
+    try {
+      await createEvent(eventData);
+      setShowCreateModal(false);
+      console.log('✅ Evento creado exitosamente');
+    } catch (error) {
+      console.error('❌ Error creando evento:', error);
+      // Aquí puedes agregar una alerta o toast para mostrar el error
+    }
+  };
+
+  // ✅ MOSTRAR LOADING INICIAL
+  if (loading && firestoreEvents.length === 0) {
+    return (
+      <View style={[styles.container, isDark && styles.containerDark, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: isDark ? '#FFFFFF' : '#000000', fontSize: 18 }}>🔄 Cargando eventos...</Text>
+        <Text style={{ color: isDark ? '#8E8E93' : '#8E8E93', fontSize: 14, marginTop: 8 }}>
+          Conectando con la base de datos
+        </Text>
+      </View>
+    );
+  }
+
+  // ✅ MOSTRAR ERROR SI HAY PROBLEMA
+  if (error && firestoreEvents.length === 0) {
+    return (
+      <View style={[styles.container, isDark && styles.containerDark, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: '#FF0000', fontSize: 18, textAlign: 'center' }}>❌ Error de conexión</Text>
+        <Text style={{ color: isDark ? '#8E8E93' : '#8E8E93', fontSize: 14, marginTop: 8, textAlign: 'center' }}>
+          {error}
+        </Text>
+        <Text style={{ color: isDark ? '#8E8E93' : '#8E8E93', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+          Usando datos de demostración
+        </Text>
+      </View>
+    );
+  }
+
   const matrixConfig = {
     aire: { 
       color: '#007AFF', 
@@ -293,6 +329,28 @@ export default function CalendarView() {
 
   const isSaturday = (date: Date): boolean => {
     return date.getDay() === 6;
+  };
+
+  // ✅ FUNCIÓN PARA CREAR EVENTO DE PRUEBA (TEMPORAL)
+  const createTestEvent = async () => {
+    try {
+      const testEvent = {
+        title: 'Evento de Prueba - ' + new Date().toLocaleTimeString(),
+        date: formatDateString(selectedDate),
+        startTime: '09:00',
+        endTime: '11:00',
+        technician: 'Usuario Prueba',
+        matrix: 'agua' as const,
+        priority: 'high' as const,
+        status: 'scheduled' as const,
+        location: 'Lima Centro - Prueba'
+      };
+      
+      await handleCreateEvent(testEvent);
+      console.log('✅ Evento de prueba creado');
+    } catch (error) {
+      console.error('❌ Error creando evento de prueba:', error);
+    }
   };
 
   // ✅ SINCRONIZAR VISTA SEMANA AL CAMBIAR selectedDate
@@ -550,15 +608,33 @@ export default function CalendarView() {
 
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
-      {/* HEADER */}
+      {/* ✅ INDICADOR DE ESTADO DE FIREBASE */}
+      {loading && (
+        <View style={{ 
+          position: 'absolute', 
+          top: Platform.OS === 'ios' ? 50 : StatusBar.currentHeight || 40, 
+          right: 16, 
+          zIndex: 1000,
+          backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
+          paddingHorizontal: 8,
+          paddingVertical: 4,
+          borderRadius: 12,
+          shadowColor: '#000000',
+          shadowOffset: { width: 0, height: 2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 4,
+          elevation: 3,
+        }}>
+          <Text style={{ color: isDark ? '#FFFFFF' : '#000000', fontSize: 12 }}>🔄 Sincronizando...</Text>
+        </View>
+      )}
+
+      {/* HEADER ALINEADO A LA IZQUIERDA */}
       <View style={[styles.header, isDark && styles.headerDark]}>
         <View style={{ height: Platform.OS === 'ios' ? 50 : StatusBar.currentHeight || 40 }} />
         
         <View style={styles.headerContent}>
-          {/* ✅ SIN FLECHA - Solo navegación con botones o título */}
-          <View style={{ width: 44 }} />
-          
-          {/* ✅ TÍTULO TÁCTIL PARA ABRIR PICKER */}
+          {/* ✅ TÍTULO ALINEADO A LA IZQUIERDA */}
           <TouchableOpacity onPress={openMonthPicker} style={styles.monthYearContainer}>
             <Text style={[styles.monthYear, isDark && styles.monthYearDark]}>
               {viewMode === 'month' 
@@ -568,32 +644,43 @@ export default function CalendarView() {
             </Text>
             <Ionicons 
               name="chevron-down" 
-              size={24} 
+              size={20} 
               color={isDark ? '#FFFFFF' : '#000000'} 
-              style={{ marginLeft: 8 }}
+              style={{ marginLeft: 6 }}
             />
           </TouchableOpacity>
           
+          {/* ✅ ACCIONES ALINEADAS A LA DERECHA */}
           <View style={styles.headerActions}>
-            {/* ✅ LUPA FUNCIONAL */}
             <TouchableOpacity 
               style={styles.headerActionButton}
               onPress={() => setShowSearchModal(true)}
             >
-              <Ionicons name="search-outline" size={22} color={isDark ? '#8E8E93' : '#8E8E93'} />
+              <Ionicons name="search-outline" size={20} color={isDark ? '#8E8E93' : '#8E8E93'} />
             </TouchableOpacity>
             
-            {/* ✅ BOTÓN + CON COLOR DEL TEMA */}
             <TouchableOpacity style={styles.headerActionButton} onPress={openCreateModal}>
               <Ionicons name="add" size={22} color={isDark ? THEME_COLOR_DARK : THEME_COLOR} />
+            </TouchableOpacity>
+
+            {/* ✅ BOTÓN DE PRUEBA TEMPORAL */}
+            <TouchableOpacity 
+              style={[styles.headerActionButton, { backgroundColor: 'orange', borderRadius: 8 }]} 
+              onPress={createTestEvent}
+            >
+              <Text style={{ color: 'white', fontSize: 10 }}>TEST</Text>
             </TouchableOpacity>
           </View>
         </View>
         
+        {/* ✅ SUBTITLE ALINEADO CON CONTROLES */}
         {viewMode === 'month' && (
           <View style={styles.subtitleContainer}>
             <Text style={[styles.subtitle, isDark && styles.subtitleDark]}>
               {mockEvents.filter(e => e.status === 'scheduled').length} monitoreos programados
+              {firestoreEvents.length > 0 && (
+                <Text style={{ color: isDark ? THEME_COLOR_DARK : THEME_COLOR }}> • En vivo</Text>
+              )}
             </Text>
           </View>
         )}
@@ -1116,6 +1203,7 @@ export default function CalendarView() {
       <CreateEventModal
         isVisible={showCreateModal}
         onClose={closeCreateModal}
+        onCreateEvent={handleCreateEvent} // ✅ FUNCIÓN REAL
         selectedDate={selectedDate}
         isDark={isDark}
       />
@@ -1139,23 +1227,25 @@ const styles = StyleSheet.create({
   headerDark: {
     backgroundColor: '#000000',
   },
+  
+  // ✅ ACTUALIZADO - Header content alineado a la izquierda
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
   },
   
-  // ✅ TÍTULO TÁCTIL
+  // ✅ ACTUALIZADO - Título alineado a la izquierda
   monthYearContainer: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
+  
   monthYear: {
-    fontSize: 34,
+    fontSize: 32,
     fontWeight: '700',
     color: '#000000',
   },
@@ -1163,18 +1253,24 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   
+  // ✅ ACTUALIZADO - Acciones a la derecha
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
   },
+  
   headerActionButton: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 4,
   },
+  
+  // ✅ ACTUALIZADO - Subtitle alineado con controles
   subtitleContainer: {
-    paddingHorizontal: 32,
+    paddingHorizontal: 16,
     paddingBottom: 8,
   },
   subtitle: {
@@ -1492,7 +1588,7 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     marginBottom: 4,
   },
-  dayHeaderLabelDark: {
+  abelDark: {
     color: '#8E8E93',
   },
 
@@ -1664,7 +1760,7 @@ const styles = StyleSheet.create({
     color: '#8E4EC6',
     fontWeight: '600',
   },
-    overtimeBadgeTextDark: {
+  overtimeBadgeTextDark: {
     color: '#BF5AF2',
   },
   

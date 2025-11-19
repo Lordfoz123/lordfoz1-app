@@ -1,20 +1,16 @@
 import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  onSnapshot,
-  orderBy,
-  query,
-  Timestamp,
-  updateDoc
+    addDoc,
+    collection,
+    deleteDoc,
+    doc,
+    getDocs,
+    onSnapshot,
+    orderBy,
+    query,
+    Timestamp,
+    updateDoc
 } from 'firebase/firestore';
-
-// ✅ CORREGIR ESTA LÍNEA - Cambiar la ruta
 import { COLLECTIONS, db, MonitoringEvent } from '../firebase';
-// Si firebase.ts está en la raíz, usa: ../firebase
-// Si está en otra carpeta, ajusta la ruta según corresponda
 
 export class EventService {
   
