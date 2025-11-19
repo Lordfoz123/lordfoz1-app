@@ -1,6 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
+  Animated,
+  Dimensions,
+  PanResponder,
   Platform,
   ScrollView,
   StatusBar,
@@ -12,6 +15,8 @@ import {
 } from 'react-native';
 import { CreateEventModal } from './CreateEventModal';
 
+const { width: screenWidth } = Dimensions.get('window');
+
 interface MonitoringEvent {
   id: string;
   title: string;
@@ -19,12 +24,14 @@ interface MonitoringEvent {
   startTime: string;
   endTime: string;
   technician: string;
-  matrix: string;
+  matrix: 'aire' | 'agua' | 'suelo' | 'ruido';
   priority: 'high' | 'medium' | 'low';
   status: 'scheduled' | 'in-progress' | 'completed' | 'cancelled';
   location: string;
   isOvertime?: boolean;
 }
+
+type MatrixFilter = 'all' | 'aire' | 'agua' | 'suelo' | 'ruido';
 
 export default function CalendarView() {
   const colorScheme = useColorScheme();
@@ -34,6 +41,11 @@ export default function CalendarView() {
   const [selectedDate, setSelectedDate] = useState(new Date(2025, 10, 5));
   const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [matrixFilter, setMatrixFilter] = useState<MatrixFilter>('all');
+
+  // ✅ ANIMACIONES PARA GESTOS
+  const translateX = useRef(new Animated.Value(0)).current;
+  const gestureThreshold = 50; // Distancia mínima para activar el gesto
 
   const mockEvents: MonitoringEvent[] = [
     // NOVIEMBRE 2025 - DATOS CORRECTOS
@@ -64,31 +76,31 @@ export default function CalendarView() {
     // SÁBADOS NOVIEMBRE: 1, 8, 15, 22, 29
     {
       id: '3',
-      title: 'Sábado de Trabajo',
+      title: 'Análisis de Suelo',
       date: '2025-11-01', // SÁBADO
       startTime: '09:00',
       endTime: '13:00',
       technician: 'Carlos Mendoza',
-      matrix: 'agua',
+      matrix: 'suelo',
       priority: 'medium',
       status: 'scheduled',
       location: 'San Isidro'
     },
     {
       id: '4',
-      title: 'Fin de Semana',
+      title: 'Medición de Ruido',
       date: '2025-11-08', // SÁBADO
       startTime: '10:00',
       endTime: '12:00',
       technician: 'Ana García',
-      matrix: 'suelo',
+      matrix: 'ruido',
       priority: 'low',
       status: 'scheduled',
       location: 'Miraflores'
     },
     {
       id: '5',
-      title: 'Sábado Extra',
+      title: 'Calidad de Aire - Surco',
       date: '2025-11-15', // SÁBADO
       startTime: '08:00',
       endTime: '14:00',
@@ -98,97 +110,84 @@ export default function CalendarView() {
       status: 'scheduled',
       location: 'Surco'
     },
-    {
-      id: '11',
-      title: 'Trabajo Sábado',
-      date: '2025-11-22', // SÁBADO
-      startTime: '07:00',
-      endTime: '15:00',
-      technician: 'María López',
-      matrix: 'ruido',
-      priority: 'medium',
-      status: 'scheduled',
-      location: 'Barranco'
-    },
-    {
-      id: '12',
-      title: 'Último Sábado',
-      date: '2025-11-29', // SÁBADO
-      startTime: '08:30',
-      endTime: '12:30',
-      technician: 'Carlos Mendoza',
-      matrix: 'agua',
-      priority: 'low',
-      status: 'scheduled',
-      location: 'Chorrillos'
-    },
-    // DOMINGOS NOVIEMBRE: 2, 9, 16, 23, 30
+    // Más eventos para la semana actual
     {
       id: '6',
-      title: 'Horas Extra - Domingo',
-      date: '2025-11-02', // DOMINGO
+      title: 'Monitoreo de Agua - Río',
+      date: '2025-11-03', // LUNES
       startTime: '07:00',
       endTime: '12:00',
       technician: 'Luis Torres',
-      matrix: 'ruido',
-      priority: 'high',
-      status: 'scheduled',
-      location: 'Zona Industrial',
-      isOvertime: true
-    },
-    {
-      id: '7',
-      title: 'Domingo Especial',
-      date: '2025-11-09', // DOMINGO
-      startTime: '06:00',
-      endTime: '14:00',
-      technician: 'María López',
-      matrix: 'aire',
-      priority: 'high',
-      status: 'scheduled',
-      location: 'Callao',
-      isOvertime: true
-    },
-    {
-      id: '8',
-      title: 'Emergencia Domingo',
-      date: '2025-11-16', // DOMINGO
-      startTime: '08:00',
-      endTime: '16:00',
-      technician: 'Carlos Mendoza',
       matrix: 'agua',
       priority: 'high',
       status: 'scheduled',
-      location: 'Villa El Salvador',
-      isOvertime: true
+      location: 'Río Rímac'
     },
     {
-      id: '13',
-      title: 'Domingo Extra',
-      date: '2025-11-23', // DOMINGO
-      startTime: '05:00',
-      endTime: '13:00',
-      technician: 'Ana García',
+      id: '7',
+      title: 'Análisis de Suelo Industrial',
+      date: '2025-11-04', // MARTES
+      startTime: '06:00',
+      endTime: '14:00',
+      technician: 'María López',
       matrix: 'suelo',
       priority: 'high',
       status: 'scheduled',
-      location: 'San Juan de Miraflores',
-      isOvertime: true
+      location: 'Zona Industrial'
     },
     {
-      id: '14',
-      title: 'Último Domingo',
-      date: '2025-11-30', // DOMINGO
+      id: '8',
+      title: 'Ruido Ambiental',
+      date: '2025-11-06', // JUEVES
+      startTime: '15:00',
+      endTime: '18:00',
+      technician: 'Carlos Mendoza',
+      matrix: 'ruido',
+      priority: 'medium',
+      status: 'scheduled',
+      location: 'Centro de Lima'
+    },
+    {
+      id: '9',
+      title: 'Calidad de Aire - Mañana',
+      date: '2025-11-07', // VIERNES
       startTime: '06:30',
-      endTime: '14:30',
-      technician: 'Luis Torres',
+      endTime: '11:30',
+      technician: 'Ana García',
       matrix: 'aire',
       priority: 'high',
       status: 'scheduled',
-      location: 'Villa María del Triunfo',
-      isOvertime: true
+      location: 'San Borja'
     }
   ];
+
+  // ✅ CONFIGURACIÓN DE MATRICES ESTILO APPLE
+  const matrixConfig = {
+    aire: { 
+      color: '#007AFF', 
+      darkColor: '#0A84FF',
+      icon: 'cloud-outline', 
+      label: 'Aire' 
+    },
+    agua: { 
+      color: '#32D74B', 
+      darkColor: '#30D158',
+      icon: 'water-outline', 
+      label: 'Agua' 
+    },
+    suelo: { 
+      color: '#8E4EC6', 
+      darkColor: '#BF5AF2',
+      icon: 'earth-outline', 
+      label: 'Suelo' 
+    },
+    ruido: { 
+      color: '#FF9500', 
+      darkColor: '#FF9F0A',
+      icon: 'volume-high-outline', 
+      label: 'Ruido' 
+    }
+  };
 
   // ✅ FUNCIONES DE UTILIDAD
   const monthNames = [
@@ -198,6 +197,7 @@ export default function CalendarView() {
 
   // ✅ ORDEN ESTÁNDAR (como Google Calendar, iOS)
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const dayNamesShort = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
 
   const formatDateString = (date: Date): string => {
     const year = date.getFullYear();
@@ -223,120 +223,96 @@ export default function CalendarView() {
     return date.getDay() === 6;
   };
 
-  // ✅ VERIFICACIÓN INICIAL
-  const verifyCalendar = () => {
-    console.log('🔍 VERIFICACIÓN HARDCODEADA NOVIEMBRE 2025:');
-    
-    // Verificar fechas específicas
-    const nov1 = new Date(2025, 10, 1);  // 1 Nov 2025
-    const nov2 = new Date(2025, 10, 2);  // 2 Nov 2025
-    
-    console.log(`📅 1 Nov 2025: ${nov1.toDateString()} | getDay() = ${nov1.getDay()} (debería ser 6 = sábado)`);
-    console.log(`📅 2 Nov 2025: ${nov2.toDateString()} | getDay() = ${nov2.getDay()} (debería ser 0 = domingo)`);
+  // ✅ GENERAR DÍAS DE LA SEMANA ACTUAL
+  const generateWeekDays = () => {
+    const startOfWeek = new Date(currentDate);
+    const day = startOfWeek.getDay();
+    const diff = startOfWeek.getDate() - day; // Restar para llegar al domingo
+    startOfWeek.setDate(diff);
+
+    const weekDays = [];
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(startOfWeek);
+      date.setDate(startOfWeek.getDate() + i);
+      weekDays.push(date);
+    }
+    return weekDays;
   };
 
-  // ✅ HARDCODEO EXACTO DE NOVIEMBRE 2025
+  // ✅ FUNCIÓN COMPLETAMENTE REDISEÑADA
   const generateCalendarDays = () => {
-    console.log('🗓️ ==========================================');
-    console.log('🗓️ HARDCODEANDO NOVIEMBRE 2025 EXACTAMENTE');
-    console.log('🗓️ ==========================================');
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
     
-    // ✅ HARDCODEAR EXACTAMENTE LO QUE DEBE APARECER
-    const hardcodedDays = [
-      // PRIMERA FILA: Dom 26 Oct a Sáb 1 Nov
-      new Date(2025, 9, 26),  // Dom 26 Oct (posición 0)
-      new Date(2025, 9, 27),  // Lun 27 Oct (posición 1)
-      new Date(2025, 9, 28),  // Mar 28 Oct (posición 2)
-      new Date(2025, 9, 29),  // Mié 29 Oct (posición 3)
-      new Date(2025, 9, 30),  // Jue 30 Oct (posición 4)
-      new Date(2025, 9, 31),  // Vie 31 Oct (posición 5)
-      new Date(2025, 10, 1),  // Sáb 1 Nov (posición 6) ← AQUÍ DEBE ESTAR
-      
-      // SEGUNDA FILA: Dom 2 Nov a Sáb 8 Nov
-      new Date(2025, 10, 2),  // Dom 2 Nov (posición 7)
-      new Date(2025, 10, 3),  // Lun 3 Nov (posición 8)
-      new Date(2025, 10, 4),  // Mar 4 Nov (posición 9)
-      new Date(2025, 10, 5),  // Mié 5 Nov (posición 10)
-      new Date(2025, 10, 6),  // Jue 6 Nov (posición 11)
-      new Date(2025, 10, 7),  // Vie 7 Nov (posición 12)
-      new Date(2025, 10, 8),  // Sáb 8 Nov (posición 13) ← AQUÍ DEBE ESTAR
-      
-      // TERCERA FILA: Dom 9 Nov a Sáb 15 Nov
-      new Date(2025, 10, 9),  // Dom 9 Nov (posición 14)
-      new Date(2025, 10, 10), // Lun 10 Nov (posición 15)
-      new Date(2025, 10, 11), // Mar 11 Nov (posición 16)
-      new Date(2025, 10, 12), // Mié 12 Nov (posición 17)
-      new Date(2025, 10, 13), // Jue 13 Nov (posición 18)
-      new Date(2025, 10, 14), // Vie 14 Nov (posición 19)
-      new Date(2025, 10, 15), // Sáb 15 Nov (posición 20) ← AQUÍ DEBE ESTAR
-      
-      // CUARTA FILA: Dom 16 Nov a Sáb 22 Nov
-      new Date(2025, 10, 16), // Dom 16 Nov (posición 21)
-      new Date(2025, 10, 17), // Lun 17 Nov (posición 22)
-      new Date(2025, 10, 18), // Mar 18 Nov (posición 23)
-      new Date(2025, 10, 19), // Mié 19 Nov (posición 24)
-      new Date(2025, 10, 20), // Jue 20 Nov (posición 25)
-      new Date(2025, 10, 21), // Vie 21 Nov (posición 26)
-      new Date(2025, 10, 22), // Sáb 22 Nov (posición 27) ← AQUÍ DEBE ESTAR
-      
-      // QUINTA FILA: Dom 23 Nov a Sáb 29 Nov
-      new Date(2025, 10, 23), // Dom 23 Nov (posición 28)
-      new Date(2025, 10, 24), // Lun 24 Nov (posición 29)
-      new Date(2025, 10, 25), // Mar 25 Nov (posición 30)
-      new Date(2025, 10, 26), // Mié 26 Nov (posición 31)
-      new Date(2025, 10, 27), // Jue 27 Nov (posición 32)
-      new Date(2025, 10, 28), // Vie 28 Nov (posición 33)
-      new Date(2025, 10, 29), // Sáb 29 Nov (posición 34) ← AQUÍ DEBE ESTAR
-      
-      // SEXTA FILA: Dom 30 Nov a Sáb 6 Dic
-      new Date(2025, 10, 30), // Dom 30 Nov (posición 35)
-      new Date(2025, 11, 1),  // Lun 1 Dic (posición 36)
-      new Date(2025, 11, 2),  // Mar 2 Dic (posición 37)
-      new Date(2025, 11, 3),  // Mié 3 Dic (posición 38)
-      new Date(2025, 11, 4),  // Jue 4 Dic (posición 39)
-      new Date(2025, 11, 5),  // Vie 5 Dic (posición 40)
-      new Date(2025, 11, 6),  // Sáb 6 Dic (posición 41)
-    ];
+    console.log(`🗓️ GENERANDO CALENDARIO PARA: ${monthNames[month]} ${year}`);
     
-    // ✅ VERIFICAR QUE LOS SÁBADOS ESTÉN EN POSICIÓN 6, 13, 20, 27, 34
-    console.log('🎯 VERIFICACIÓN DE SÁBADOS HARDCODEADOS:');
-    [6, 13, 20, 27, 34].forEach(pos => {
-      const date = hardcodedDays[pos];
-      const dayOfWeek = date.getDay();
-      const dayOfMonth = date.getDate();
-      const month = date.getMonth();
-      console.log(`🎯 Posición ${pos}: ${dayOfMonth}/${month + 1} | getDay: ${dayOfWeek} | ${dayOfWeek === 6 ? '✅SÁBADO' : '❌NO-SÁBADO'}`);
-    });
+    // Primer día del mes
+    const firstDayOfMonth = new Date(year, month, 1);
+    const startDay = firstDayOfMonth.getDay(); // 0 = domingo, 6 = sábado
     
-    // ✅ VERIFICAR QUE LOS DOMINGOS ESTÉN EN POSICIÓN 0, 7, 14, 21, 28, 35
-    console.log('🎯 VERIFICACIÓN DE DOMINGOS HARDCODEADOS:');
-    [0, 7, 14, 21, 28, 35].forEach(pos => {
-      const date = hardcodedDays[pos];
-      const dayOfWeek = date.getDay();
-      const dayOfMonth = date.getDate();
-      const month = date.getMonth();
-      console.log(`🎯 Posición ${pos}: ${dayOfMonth}/${month + 1} | getDay: ${dayOfWeek} | ${dayOfWeek === 0 ? '✅DOMINGO' : '❌NO-DOMINGO'}`);
-    });
+    // Último día del mes
+    const lastDayOfMonth = new Date(year, month + 1, 0);
+    const daysInMonth = lastDayOfMonth.getDate();
     
-    console.log('🗓️ ==========================================');
-    console.log('🗓️ FIN DEL HARDCODEO');
-    console.log('🗓️ ==========================================');
+    console.log(`📅 Primer día: ${firstDayOfMonth.toDateString()} (día semana: ${startDay})`);
+    console.log(`📅 Días en el mes: ${daysInMonth}`);
     
-    return hardcodedDays;
+    const calendarDays: Date[] = [];
+    
+    // ✅ DÍAS DEL MES ANTERIOR (para llenar la primera semana)
+    for (let i = startDay - 1; i >= 0; i--) {
+      const prevMonthDay = new Date(year, month - 1, new Date(year, month, 0).getDate() - i);
+      calendarDays.push(prevMonthDay);
+      console.log(`⬅️ Mes anterior: ${prevMonthDay.getDate()}/${prevMonthDay.getMonth() + 1} (${prevMonthDay.toDateString()})`);
+    }
+    
+    // ✅ DÍAS DEL MES ACTUAL
+    for (let day = 1; day <= daysInMonth; day++) {
+      const currentDay = new Date(year, month, day);
+      calendarDays.push(currentDay);
+      
+      if (currentDay.getDay() === 6) { // Es sábado
+        console.log(`🔵 SÁBADO: ${day}/${month + 1} en posición ${calendarDays.length - 1}`);
+      }
+      if (currentDay.getDay() === 0) { // Es domingo
+        console.log(`🟣 DOMINGO: ${day}/${month + 1} en posición ${calendarDays.length - 1}`);
+      }
+    }
+    
+    // ✅ DÍAS DEL MES SIGUIENTE (para completar 6 semanas)
+    const totalDays = calendarDays.length;
+    const remainingDays = 42 - totalDays; // 6 semanas × 7 días = 42
+    
+    for (let day = 1; day <= remainingDays; day++) {
+      const nextMonthDay = new Date(year, month + 1, day);
+      calendarDays.push(nextMonthDay);
+      console.log(`➡️ Mes siguiente: ${nextMonthDay.getDate()}/${nextMonthDay.getMonth() + 1} (${nextMonthDay.toDateString()})`);
+    }
+    
+    console.log(`📊 TOTAL DÍAS GENERADOS: ${calendarDays.length}`);
+    
+    return calendarDays;
   };
 
-  // ✅ USAR useEffect PARA VERIFICACIÓN
-  useEffect(() => {
-    verifyCalendar();
-  }, []);
-
-  // ✅ NAVEGACIÓN DE MESES
-  const goToPreviousMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+  // ✅ NAVEGACIÓN DE MESES/SEMANAS
+  const goToPrevious = () => {
+    if (viewMode === 'month') {
+      setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+    } else {
+      const newDate = new Date(currentDate);
+      newDate.setDate(currentDate.getDate() - 7);
+      setCurrentDate(newDate);
+    }
   };
 
-  const goToNextMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+  const goToNext = () => {
+    if (viewMode === 'month') {
+      setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+    } else {
+      const newDate = new Date(currentDate);
+      newDate.setDate(currentDate.getDate() + 7);
+      setCurrentDate(newDate);
+    }
   };
 
   const goToToday = () => {
@@ -344,6 +320,46 @@ export default function CalendarView() {
     setCurrentDate(today);
     setSelectedDate(today);
   };
+
+  // ✅ CONFIGURACIÓN DE GESTOS CON PanResponder
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (evt, gestureState) => {
+        // Solo activar si el movimiento es principalmente horizontal
+        return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 10;
+      },
+      onPanResponderGrant: () => {
+        translateX.setOffset(translateX._value);
+      },
+      onPanResponderMove: (evt, gestureState) => {
+        // Limitar el movimiento para que no sea excesivo
+        const limitedDx = Math.max(-100, Math.min(100, gestureState.dx));
+        translateX.setValue(limitedDx);
+      },
+      onPanResponderRelease: (evt, gestureState) => {
+        translateX.flattenOffset();
+        
+        // Determinar dirección y activar navegación
+        if (Math.abs(gestureState.dx) > gestureThreshold) {
+          if (gestureState.dx > 0) {
+            // Swipe derecha = mes/semana anterior
+            goToPrevious();
+          } else {
+            // Swipe izquierda = mes/semana siguiente
+            goToNext();
+          }
+        }
+        
+        // Resetear animación
+        Animated.spring(translateX, {
+          toValue: 0,
+          tension: 100,
+          friction: 8,
+          useNativeDriver: false,
+        }).start();
+      },
+    })
+  ).current;
 
   // ✅ FUNCIONES DE EVENTOS
   const getPriorityColor = (priority: string) => {
@@ -367,7 +383,14 @@ export default function CalendarView() {
 
   const getEventsForDate = (date: Date) => {
     const dateStr = formatDateString(date);
-    return mockEvents.filter(event => event.date === dateStr);
+    let events = mockEvents.filter(event => event.date === dateStr);
+    
+    // Aplicar filtro de matriz
+    if (matrixFilter !== 'all') {
+      events = events.filter(event => event.matrix === matrixFilter);
+    }
+    
+    return events;
   };
 
   const hasEvents = (date: Date) => {
@@ -382,255 +405,516 @@ export default function CalendarView() {
     setShowCreateModal(false);
   };
 
+  // ✅ GENERAR HORAS PARA VISTA SEMANAL MEJORADA
+  const generateHours = () => {
+    const hours = [];
+    // Mostrar solo horario laboral relevante (6 AM - 10 PM)
+    for (let i = 6; i <= 22; i++) {
+      const hour12 = i > 12 ? i - 12 : i === 0 ? 12 : i;
+      const ampm = i >= 12 ? 'p. m.' : 'a. m.';
+      
+      if (i === 12) {
+        hours.push({ hour24: i, display: 'Mediodía', short: '12 PM' });
+      } else {
+        hours.push({ 
+          hour24: i, 
+          display: `${hour12} ${ampm}`,
+          short: `${hour12}${ampm === 'a. m.' ? 'AM' : 'PM'}`
+        });
+      }
+    }
+    return hours;
+  };
+
+  // ✅ CALCULAR POSICIÓN Y ALTURA DE EVENTOS
+  const calculateEventLayout = (event: MonitoringEvent) => {
+    const startHour = parseInt(event.startTime.split(':')[0]);
+    const startMinutes = parseInt(event.startTime.split(':')[1]);
+    const endHour = parseInt(event.endTime.split(':')[0]);
+    const endMinutes = parseInt(event.endTime.split(':')[1]);
+    
+    const startPosition = ((startHour - 6) * 60 + startMinutes); // Offset desde 6 AM
+    const duration = (endHour - startHour) * 60 + (endMinutes - startMinutes);
+    
+    return {
+      top: startPosition,
+      height: Math.max(duration, 30), // Mínimo 30 minutos de altura
+      duration: duration
+    };
+  };
+
   const calendarDays = generateCalendarDays();
+  const weekDays = generateWeekDays();
   const selectedDateEvents = getEventsForDate(selectedDate);
   const currentMonth = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
+  const hours = generateHours();
+
+  // ✅ CALCULAR ANCHO EXACTO DE CELDA
+  const containerPadding = 32; // 16 * 2
+  const gridPadding = 16; // 8 * 2
+  const availableWidth = screenWidth - containerPadding - gridPadding;
+  const cellWidth = Math.floor(availableWidth / 7);
 
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
-      {/* HEADER */}
+      {/* HEADER ESTILO APPLE */}
       <View style={[styles.header, isDark && styles.headerDark]}>
         <View style={{ height: Platform.OS === 'ios' ? 50 : StatusBar.currentHeight || 40 }} />
         
         <View style={styles.headerContent}>
-          <View style={styles.headerLeft}>
-            <View style={styles.monthNavigation}>
-              <TouchableOpacity onPress={goToPreviousMonth} style={styles.navButton}>
-                <Ionicons name="chevron-back" size={20} color="#4CAF50" />
-              </TouchableOpacity>
-              
-              <Text style={[styles.monthYear, isDark && styles.textDark]}>
-                {monthNames[currentMonth]} {currentYear}
-              </Text>
-              
-              <TouchableOpacity onPress={goToNextMonth} style={styles.navButton}>
-                <Ionicons name="chevron-forward" size={20} color="#4CAF50" />
-              </TouchableOpacity>
-            </View>
-            
+          <TouchableOpacity onPress={goToPrevious} style={styles.navButton}>
+            <Ionicons name="chevron-back" size={24} color={isDark ? '#007AFF' : '#007AFF'} />
+          </TouchableOpacity>
+          
+          <Text style={[styles.monthYear, isDark && styles.monthYearDark]}>
+            {viewMode === 'month' 
+              ? `${monthNames[currentMonth]} ${currentYear}`
+              : `${monthNames[weekDays[0].getMonth()]} ${weekDays[0].getFullYear()}`
+            }
+          </Text>
+          
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.headerActionButton}>
+              <Ionicons name="search-outline" size={22} color={isDark ? '#8E8E93' : '#8E8E93'} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerActionButton} onPress={openCreateModal}>
+              <Ionicons name="add" size={22} color={isDark ? '#007AFF' : '#007AFF'} />
+            </TouchableOpacity>
+          </View>
+        </View>
+        
+        {/* SUBTITLE SOLO EN VISTA MES */}
+        {viewMode === 'month' && (
+          <View style={styles.subtitleContainer}>
             <Text style={[styles.subtitle, isDark && styles.subtitleDark]}>
               {mockEvents.filter(e => e.status === 'scheduled').length} monitoreos programados
             </Text>
           </View>
-
-          <TouchableOpacity style={styles.addButton} onPress={openCreateModal}>
-            <Ionicons name="add" size={24} color="#fff" />
-          </TouchableOpacity>
-        </View>
+        )}
       </View>
 
-      {/* CONTROLES */}
-      <View style={styles.controlsRow}>
-        <View style={[styles.viewSelector, isDark && styles.viewSelectorDark]}>
-          {[
-            { key: 'month', label: 'Mes' },
-            { key: 'week', label: 'Semana' }
-          ].map(({ key, label }) => (
+      {/* CONTROLES DE VISTA Y FILTROS ESTILO APPLE */}
+      <View style={[styles.controlsContainer, isDark && styles.controlsContainerDark]}>
+        {/* SELECTOR DE VISTA */}
+        <View style={styles.viewControls}>
+          <View style={[styles.viewSelector, isDark && styles.viewSelectorDark]}>
             <TouchableOpacity
-              key={key}
               style={[
                 styles.viewOption,
-                viewMode === key && styles.viewOptionActive
+                viewMode === 'month' && styles.viewOptionActive,
+                viewMode === 'month' && (isDark ? styles.viewOptionActiveDark : styles.viewOptionActiveLight)
               ]}
-              onPress={() => setViewMode(key as any)}
+              onPress={() => setViewMode('month')}
             >
               <Text style={[
                 styles.viewOptionText,
-                viewMode === key && styles.viewOptionTextActive
+                isDark && styles.viewOptionTextDark,
+                viewMode === 'month' && styles.viewOptionTextActive
               ]}>
-                {label}
+                Mes
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[
+                styles.viewOption,
+                viewMode === 'week' && styles.viewOptionActive,
+                viewMode === 'week' && (isDark ? styles.viewOptionActiveDark : styles.viewOptionActiveLight)
+              ]}
+              onPress={() => setViewMode('week')}
+            >
+              <Text style={[
+                styles.viewOptionText,
+                isDark && styles.viewOptionTextDark,
+                viewMode === 'week' && styles.viewOptionTextActive
+              ]}>
+                Semana
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity style={[styles.todayButton, isDark && styles.todayButtonDark]} onPress={goToToday}>
+            <Text style={[styles.todayButtonText, isDark && styles.todayButtonTextDark]}>Hoy</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* FILTROS DE MATRIZ ESTILO APPLE */}
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          style={styles.filtersRow}
+          contentContainerStyle={styles.filtersContent}
+        >
+          <TouchableOpacity
+            style={[
+              styles.filterChip,
+              isDark && styles.filterChipDark,
+              matrixFilter === 'all' && styles.filterChipActive,
+              matrixFilter === 'all' && (isDark ? styles.filterChipActiveDark : styles.filterChipActiveLight)
+            ]}
+            onPress={() => setMatrixFilter('all')}
+          >
+            <Ionicons 
+              name="apps" 
+              size={16} 
+              color={matrixFilter === 'all' ? '#FFFFFF' : (isDark ? '#8E8E93' : '#8E8E93')} 
+            />
+            <Text style={[
+              styles.filterChipText,
+              isDark && styles.filterChipTextDark,
+              matrixFilter === 'all' && styles.filterChipTextActive
+            ]}>
+              Todas
+            </Text>
+          </TouchableOpacity>
+
+          {Object.entries(matrixConfig).map(([key, config]) => (
+            <TouchableOpacity
+              key={key}
+              style={[
+                styles.filterChip,
+                isDark && styles.filterChipDark,
+                matrixFilter === key && styles.filterChipActive,
+                matrixFilter === key && { backgroundColor: isDark ? config.darkColor : config.color }
+              ]}
+              onPress={() => setMatrixFilter(key as MatrixFilter)}
+            >
+              <Ionicons 
+                name={config.icon as any} 
+                size={16} 
+                color={matrixFilter === key ? '#FFFFFF' : (isDark ? config.darkColor : config.color)} 
+              />
+              <Text style={[
+                styles.filterChipText,
+                matrixFilter === key && styles.filterChipTextActive,
+                matrixFilter !== key && { color: isDark ? config.darkColor : config.color }
+              ]}>
+                {config.label}
               </Text>
             </TouchableOpacity>
           ))}
-        </View>
-
-        <TouchableOpacity style={styles.todayButton} onPress={goToToday}>
-          <Text style={styles.todayButtonText}>Hoy</Text>
-        </TouchableOpacity>
+        </ScrollView>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* DÍAS DE LA SEMANA */}
-        <View style={styles.weekDays}>
-          {dayNames.map((day) => (
-            <Text key={day} style={[
-              styles.weekDay, 
-              isDark && styles.weekDayDark,
-              day === 'Dom' && styles.weekDaySunday,
-              day === 'Sáb' && styles.weekDaySaturday
-            ]}>
-              {day}
-            </Text>
-          ))}
-        </View>
+      {/* CONTENIDO CON GESTOS ACTIVADOS */}
+      <Animated.View 
+        style={[
+          styles.content, 
+          { 
+            transform: [{ translateX }],
+            opacity: translateX.interpolate({
+              inputRange: [-100, 0, 100],
+              outputRange: [0.7, 1, 0.7],
+              extrapolate: 'clamp',
+            })
+          }
+        ]}
+        {...panResponder.panHandlers}
+      >
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {viewMode === 'month' ? (
+            <>
+              {/* DÍAS DE LA SEMANA */}
+              <View style={styles.weekDays}>
+                {dayNames.map((day) => (
+                  <View key={day} style={{ width: cellWidth }}>
+                    <Text style={[
+                      styles.weekDay, 
+                      isDark && styles.weekDayDark,
+                      day === 'Dom' && (isDark ? styles.weekDaySundayDark : styles.weekDaySunday),
+                      day === 'Sáb' && (isDark ? styles.weekDaySaturdayDark : styles.weekDaySaturday)
+                    ]}>
+                      {day}
+                    </Text>
+                  </View>
+                ))}
+              </View>
 
-        {/* ✅ GRID DE DÍAS HARDCODEADO */}
-        <View style={[styles.daysGrid, isDark && styles.daysGridDark]}>
-          {calendarDays.map((date, index) => {
-            const dayOfWeek = date.getDay(); // 0=Domingo, 6=Sábado
-            const dayOfMonth = date.getDate();
-            const isCurrentMonth = date.getMonth() === currentMonth;
-            const isSelected = isSameDate(date, selectedDate);
-            const isTodayDate = isToday(date);
-            const dayEvents = getEventsForDate(date);
-            const col = index % 7; // 0=Dom, 6=Sáb
+              {/* GRID DE DÍAS CON SOLO COLORES EN NÚMEROS */}
+              <View style={[styles.daysGrid, isDark && styles.daysGridDark]}>
+                {calendarDays.map((date, index) => {
+                  const dayOfMonth = date.getDate();
+                  const isCurrentMonth = date.getMonth() === currentMonth;
+                  const isSelected = isSameDate(date, selectedDate);
+                  const isTodayDate = isToday(date);
+                  const dayEvents = getEventsForDate(date);
+                  
+                  // ✅ DETERMINAR SI ES SÁBADO O DOMINGO BASADO EN getDay()
+                  const isSaturdayDay = date.getDay() === 6;
+                  const isSundayDay = date.getDay() === 0;
 
-            // ✅ DEBUG HARDCODEADO
-            if (col === 6) { // Columna sábado
-              console.log(`🎨 COLUMNA SÁBADO [${index}]: día ${dayOfMonth}, mes ${date.getMonth() + 1}, dayOfWeek ${dayOfWeek}`);
-            }
+                  return (
+                    <TouchableOpacity
+                      key={`day-${index}-${dayOfMonth}-${date.getMonth()}-${date.getFullYear()}`}
+                      style={[
+                        styles.dayCell,
+                        { width: cellWidth },
+                        isSelected && (isDark ? styles.selectedDayDark : styles.selectedDay),
+                      ]}
+                      onPress={() => setSelectedDate(new Date(date))}
+                    >
+                      <View style={[
+                        styles.dayNumberContainer,
+                        isTodayDate && (isDark ? styles.todayCircleDark : styles.todayCircle)
+                      ]}>
+                        <Text style={[
+                          styles.dayNumber,
+                          isDark && styles.dayNumberDark,
+                          isSelected && styles.selectedDayText,
+                          isTodayDate && styles.todayDayText,
+                          // ✅ SOLO COLORES EN TEXTO - SIN CUADROS
+                          isSaturdayDay && isCurrentMonth && (isDark ? styles.saturdayDayTextDark : styles.saturdayDayText),
+                          isSundayDay && isCurrentMonth && (isDark ? styles.sundayDayTextDark : styles.sundayDayText),
+                          !isCurrentMonth && styles.otherMonthText,
+                        ]}>
+                          {dayOfMonth}
+                        </Text>
+                      </View>
 
-            // ✅ LÓGICA DE ESTILOS
-            const isSaturday = dayOfWeek === 6;
-            const isSunday = dayOfWeek === 0;
+                      {/* EVENTOS */}
+                      {hasEvents(date) && (
+                        <View style={styles.eventIndicators}>
+                          {dayEvents.slice(0, 3).map((event, idx) => (
+                            <View
+                              key={`${event.id}-${idx}`}
+                              style={[
+                                styles.eventDot,
+                                { backgroundColor: isDark ? matrixConfig[event.matrix].darkColor : matrixConfig[event.matrix].color }
+                              ]}
+                            />
+                          ))}
+                        </View>
+                      )}
+                      
+                      {/* INDICADOR DOMINGO SIN EVENTOS */}
+                      {isSundayDay && isCurrentMonth && !hasEvents(date) && (
+                        <View style={styles.sundayIndicator}>
+                          <Ionicons name="time-outline" size={10} color={isDark ? "#BF5AF2" : "#8E4EC6"} />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </>
+          ) : (
+            /* ✅ VISTA DE SEMANA MEJORADA ESTILO APPLE */
+            <View style={[styles.weekContainer, isDark && styles.weekContainerDark]}>
+              {/* ENCABEZADOS DE DÍAS */}
+              <View style={[styles.weekHeader, isDark && styles.weekHeaderDark]}>
+                <View style={styles.timeColumnHeader} />
+                {weekDays.map((date, index) => {
+                  const isTodayDate = isToday(date);
+                  const isSelectedDate = isSameDate(date, selectedDate);
+                  const isSaturdayDay = date.getDay() === 6;
+                  const isSundayDay = date.getDay() === 0;
+                  
+                  return (
+                    <TouchableOpacity 
+                      key={index} 
+                      style={styles.dayColumnHeader}
+                      onPress={() => setSelectedDate(new Date(date))}
+                    >
+                      <Text style={[
+                        styles.weekDayLabel,
+                        isDark && styles.weekDayLabelDark,
+                        isSundayDay && (isDark ? styles.weekDaySundayDark : styles.weekDaySunday),
+                        isSaturdayDay && (isDark ? styles.weekDaySaturdayDark : styles.weekDaySaturday)
+                      ]}>
+                        {dayNamesShort[date.getDay()]}
+                      </Text>
+                      <View style={[
+                        styles.weekDayNumber,
+                        isTodayDate && (isDark ? styles.todayCircleDark : styles.todayCircle),
+                        isSelectedDate && !isTodayDate && (isDark ? styles.selectedCircleDark : styles.selectedCircle)
+                      ]}>
+                        <Text style={[
+                          styles.weekDayNumberText,
+                          isDark && styles.weekDayNumberTextDark,
+                          (isTodayDate || isSelectedDate) && styles.weekDayNumberTextActive
+                        ]}>
+                          {date.getDate()}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
 
-            return (
-              <TouchableOpacity
-                key={`day-${index}-${dayOfMonth}-${date.getMonth()}`}
-                style={[
-                  styles.dayCell,
-                  isSelected && styles.selectedDay,
-                  isTodayDate && styles.todayDay,
-                  isSaturday && isCurrentMonth && styles.saturdayDay,
-                  isSunday && isCurrentMonth && styles.sundayDay,
-                  !isCurrentMonth && styles.otherMonthDay,
-                ]}
-                onPress={() => setSelectedDate(new Date(date))}
-              >
-                <Text style={[
-                  styles.dayNumber,
-                  isSelected && styles.selectedDayText,
-                  isTodayDate && styles.todayDayText,
-                  isSaturday && isCurrentMonth && styles.saturdayDayText,
-                  isSunday && isCurrentMonth && styles.sundayDayText,
-                  !isCurrentMonth && styles.otherMonthText,
-                  isDark && styles.dayNumberDark,
-                ]}>
-                  {dayOfMonth}
-                </Text>
-
-                {/* EVENTOS */}
-                {hasEvents(date) && (
-                  <View style={styles.eventIndicators}>
-                    {dayEvents.slice(0, 3).map((event, idx) => (
-                      <View
-                        key={`${event.id}-${idx}`}
-                        style={[
-                          styles.eventDot,
-                          { backgroundColor: getPriorityColor(event.priority) }
-                        ]}
-                      />
+              {/* GRILLA DE HORAS CON EVENTOS POSICIONADOS */}
+              <ScrollView style={styles.weekGrid} showsVerticalScrollIndicator={false}>
+                <View style={styles.weekContent}>
+                  {/* LÍNEAS DE TIEMPO */}
+                  <View style={styles.timeLinesContainer}>
+                    {hours.map((timeSlot, hourIndex) => (
+                      <View key={timeSlot.hour24} style={[styles.timeSlot, isDark && styles.timeSlotDark]}>
+                        <View style={styles.timeColumn}>
+                          <Text style={[styles.hourLabel, isDark && styles.hourLabelDark]}>
+                            {timeSlot.short}
+                          </Text>
+                        </View>
+                        <View style={[styles.timeLine, isDark && styles.timeLineDark]} />
+                      </View>
                     ))}
                   </View>
-                )}
-                
-                {/* INDICADOR DOMINGO SIN EVENTOS */}
-                {dayOfWeek === 0 && isCurrentMonth && !hasEvents(date) && (
-                  <View style={styles.sundayIndicator}>
-                    <Ionicons name="time-outline" size={10} color="#8B5CF6" />
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
 
-        {/* EVENTOS DEL DÍA SELECCIONADO */}
-        <View style={[styles.dayEvents, isDark && styles.dayEventsDark]}>
-          <View style={styles.dayEventsHeader}>
-            <Text style={[styles.dayEventsTitle, isDark && styles.textDark]}>
-              {isSameDate(selectedDate, new Date()) ? 'Hoy' : 
-               `${selectedDate.getDate()} ${monthNames[selectedDate.getMonth()]}`}
-            </Text>
-            <View style={styles.eventStats}>
-              <Text style={[styles.eventCount, isDark && styles.subtitleDark]}>
-                {selectedDateEvents.length} eventos
-              </Text>
-              {isSunday(selectedDate) && (
-                <View style={styles.overtimeBadge}>
-                  <Ionicons name="time" size={12} color="#8B5CF6" />
-                  <Text style={styles.overtimeBadgeText}>Domingo</Text>
-                </View>
-              )}
-              {isSaturday(selectedDate) && (
-                <View style={styles.saturdayBadge}>
-                  <Ionicons name="calendar" size={12} color="#2196F3" />
-                  <Text style={styles.saturdayBadgeText}>Sábado</Text>
-                </View>
-              )}
-            </View>
-          </View>
-          
-          {selectedDateEvents.length > 0 ? (
-            selectedDateEvents.map((event) => (
-              <TouchableOpacity
-                key={event.id}
-                style={[
-                  styles.eventCard, 
-                  isDark && styles.eventCardDark,
-                  event.isOvertime && styles.overtimeEventCard
-                ]}
-              >
-                <View style={[
-                  styles.priorityBar,
-                  { backgroundColor: getPriorityColor(event.priority) }
-                ]} />
-                
-                <View style={styles.eventContent}>
-                  <View style={styles.eventHeader}>
-                    <Text style={[styles.eventTitle, isDark && styles.textDark]}>
-                      {event.title}
-                    </Text>
-                    <View style={styles.eventIcons}>
-                      {event.isOvertime && (
-                        <Ionicons name="time" size={14} color="#8B5CF6" />
-                      )}
-                      <Ionicons
-                        name={getStatusIcon(event.status)}
-                        size={16}
-                        color={getPriorityColor(event.priority)}
-                      />
-                    </View>
+                  {/* EVENTOS POSICIONADOS ABSOLUTAMENTE */}
+                  <View style={styles.eventsContainer}>
+                    {weekDays.map((date, dayIndex) => {
+                      const dayEvents = getEventsForDate(date);
+                      const dayWidth = (screenWidth - 32 - 60) / 7; // Ancho disponible dividido por 7 días
+                      
+                      return (
+                        <View 
+                          key={dayIndex} 
+                          style={[
+                            styles.dayEventsColumn,
+                            { 
+                              left: 60 + (dayIndex * dayWidth),
+                              width: dayWidth - 2
+                            }
+                          ]}
+                        >
+                          {dayEvents.map((event) => {
+                            const layout = calculateEventLayout(event);
+                            
+                            return (
+                              <TouchableOpacity
+                                key={event.id}
+                                style={[
+                                  styles.weekEventCard,
+                                  {
+                                    top: layout.top,
+                                    height: layout.height,
+                                    backgroundColor: isDark 
+                                      ? matrixConfig[event.matrix].darkColor 
+                                      : matrixConfig[event.matrix].color,
+                                  }
+                                ]}
+                              >
+                                <Text style={styles.weekEventCardTitle} numberOfLines={2}>
+                                  {event.title}
+                                </Text>
+                                <Text style={styles.weekEventCardTime}>
+                                  {event.startTime} - {event.endTime}
+                                </Text>
+                                <Text style={styles.weekEventCardLocation} numberOfLines={1}>
+                                  📍 {event.location}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      );
+                    })}
                   </View>
-                  
-                  <Text style={[styles.eventTime, isDark && styles.subtitleDark]}>
-                    ⏰ {event.startTime} - {event.endTime}
-                    {event.isOvertime && (
-                      <Text style={styles.overtimeLabel}> • Horas Extra</Text>
-                    )}
-                  </Text>
-                  
-                  <Text style={[styles.eventTechnician, isDark && styles.subtitleDark]}>
-                    👤 {event.technician}
-                  </Text>
-                  
-                  <Text style={[styles.eventLocation, isDark && styles.subtitleDark]}>
-                    📍 {event.location}
-                  </Text>
+
+                  {/* LÍNEA DE TIEMPO ACTUAL */}
+                  {weekDays.some(date => isToday(date)) && (
+                    <View style={[styles.currentTimeLine, isDark && styles.currentTimeLineDark]}>
+                      <View style={[styles.currentTimeDot, isDark && styles.currentTimeDotDark]} />
+                      <View style={[styles.currentTimeLineBar, isDark && styles.currentTimeLineBarDark]} />
+                    </View>
+                  )}
                 </View>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <View style={styles.noEvents}>
-              <Ionicons name="calendar-outline" size={48} color={isDark ? '#666' : '#ccc'} />
-              <Text style={[styles.noEventsText, isDark && styles.subtitleDark]}>
-                No hay eventos programados
-              </Text>
-              {isSunday(selectedDate) && (
-                <Text style={[styles.noEventsSubtext, isDark && styles.subtitleDark]}>
-                  Los domingos permiten programar horas extra
+              </ScrollView>
+            </View>
+          )}
+
+          {/* EVENTOS DEL DÍA SELECCIONADO (solo en vista mes) */}
+          {viewMode === 'month' && (
+            <View style={[styles.dayEvents, isDark && styles.dayEventsDark]}>
+              <View style={styles.dayEventsHeader}>
+                <Text style={[styles.dayEventsTitle, isDark && styles.dayEventsTitleDark]}>
+                  {isSameDate(selectedDate, new Date()) ? 'Hoy' : 
+                   `${selectedDate.getDate()} ${monthNames[selectedDate.getMonth()]}`}
                 </Text>
-              )}
-              {isSaturday(selectedDate) && (
-                <Text style={[styles.noEventsSubtext, isDark && styles.subtitleDark]}>
-                  Los sábados son ideales para trabajo especial
-                </Text>
+                <View style={styles.eventStats}>
+                  <Text style={[styles.eventCount, isDark && styles.eventCountDark]}>
+                    {selectedDateEvents.length} eventos
+                  </Text>
+                  {isSunday(selectedDate) && (
+                    <View style={[styles.overtimeBadge, isDark && styles.overtimeBadgeDark]}>
+                      <Ionicons name="time" size={12} color={isDark ? "#BF5AF2" : "#8E4EC6"} />
+                      <Text style={[styles.overtimeBadgeText, isDark && styles.overtimeBadgeTextDark]}>Domingo</Text>
+                    </View>
+                  )}
+                  {isSaturday(selectedDate) && (
+                    <View style={[styles.saturdayBadge, isDark && styles.saturdayBadgeDark]}>
+                      <Ionicons name="calendar" size={12} color={isDark ? "#0A84FF" : "#007AFF"} />
+                      <Text style={[styles.saturdayBadgeText, isDark && styles.saturdayBadgeTextDark]}>Sábado</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+              
+              {selectedDateEvents.length > 0 ? (
+                selectedDateEvents.map((event) => (
+                  <TouchableOpacity
+                    key={event.id}
+                    style={[
+                      styles.eventCard, 
+                      isDark && styles.eventCardDark,
+                      event.isOvertime && styles.overtimeEventCard
+                    ]}
+                  >
+                    <View style={[
+                      styles.priorityBar,
+                      { backgroundColor: isDark ? matrixConfig[event.matrix].darkColor : matrixConfig[event.matrix].color }
+                    ]} />
+                    
+                    <View style={styles.eventContent}>
+                      <View style={styles.eventHeader}>
+                        <Text style={[styles.eventTitle, isDark && styles.eventTitleDark]}>
+                          {event.title}
+                        </Text>
+                        <View style={styles.eventIcons}>
+                          <Ionicons
+                            name={matrixConfig[event.matrix].icon as any}
+                            size={16}
+                            color={isDark ? matrixConfig[event.matrix].darkColor : matrixConfig[event.matrix].color}
+                          />
+                          {event.isOvertime && (
+                            <Ionicons name="time" size={14} color={isDark ? "#BF5AF2" : "#8E4EC6"} />
+                          )}
+                        </View>
+                      </View>
+                      
+                      <Text style={[styles.eventTime, isDark && styles.eventTimeDark]}>
+                        ⏰ {event.startTime} - {event.endTime}
+                        {event.isOvertime && (
+                          <Text style={[styles.overtimeLabel, isDark && styles.overtimeLabelDark]}> • Horas Extra</Text>
+                        )}
+                      </Text>
+                      
+                      <Text style={[styles.eventTechnician, isDark && styles.eventTechnicianDark]}>
+                        👤 {event.technician}
+                      </Text>
+                      
+                      <Text style={[styles.eventLocation, isDark && styles.eventLocationDark]}>
+                        📍 {event.location}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <View style={styles.noEvents}>
+                  <Ionicons name="calendar-outline" size={48} color={isDark ? '#48484A' : '#C7C7CC'} />
+                  <Text style={[styles.noEventsText, isDark && styles.noEventsTextDark]}>
+                    No hay eventos programados
+                  </Text>
+                  {matrixFilter !== 'all' && (
+                    <Text style={[styles.noEventsSubtext, isDark && styles.noEventsSubtextDark]}>
+                      Filtro activo: {matrixConfig[matrixFilter as keyof typeof matrixConfig]?.label}
+                    </Text>
+                  )}
+                </View>
               )}
             </View>
           )}
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </Animated.View>
 
       <CreateEventModal
         isVisible={showCreateModal}
@@ -642,131 +926,187 @@ export default function CalendarView() {
   );
 }
 
+// ✅ Los estilos permanecen exactamente iguales
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#F2F2F7',
   },
   containerDark: {
-    backgroundColor: '#000',
+    backgroundColor: '#000000',
   },
   
+  // ✅ HEADER ESTILO APPLE
   header: {
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: '#F2F2F7',
+    paddingBottom: 8,
   },
   headerDark: {
-    backgroundColor: '#1c1c1e',
-    borderBottomColor: '#333',
+    backgroundColor: '#000000',
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  monthNavigation: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    paddingVertical: 8,
   },
   navButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
   },
   monthYear: {
-    fontSize: 22,
+    fontSize: 34,
     fontWeight: '700',
-    color: '#000',
-    minWidth: 160,
-    textAlign: 'center',
+    color: '#000000',
+    flex: 1,
+    textAlign: 'left',
+    marginLeft: 16,
   },
-  subtitle: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 4,
+  monthYearDark: {
+    color: '#FFFFFF',
   },
-  subtitleDark: {
-    color: '#999',
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  addButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#4CAF50',
+  headerActionButton: {
+    width: 44,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#4CAF50',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
+  },
+  subtitleContainer: {
+    paddingHorizontal: 32,
+    paddingBottom: 8,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#8E8E93',
+  },
+  subtitleDark: {
+    color: '#8E8E93',
   },
 
-  controlsRow: {
+  // ✅ CONTROLES ESTILO APPLE
+  controlsContainer: {
+    backgroundColor: '#F2F2F7',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  controlsContainerDark: {
+    backgroundColor: '#000000',
+  },
+  
+  viewControls: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-    gap: 12,
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
+  
   viewSelector: {
-    flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 4,
-    shadowColor: '#000',
+    backgroundColor: '#E5E5EA',
+    borderRadius: 10,
+    padding: 2,
+  },
+  viewSelectorDark: {
+    backgroundColor: '#1C1C1E',
+  },
+  
+  viewOption: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  viewOptionActive: {
+    backgroundColor: '#FFFFFF',
+  },
+  viewOptionActiveLight: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.15,
     shadowRadius: 2,
     elevation: 2,
   },
-  viewSelectorDark: {
-    backgroundColor: '#2c2c2e',
+  viewOptionActiveDark: {
+    backgroundColor: '#2C2C2E',
   },
-  viewOption: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  viewOptionActive: {
-    backgroundColor: '#4CAF50',
-  },
+  
   viewOptionText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
-    color: '#666',
+    color: '#000000',
+  },
+  viewOptionTextDark: {
+    color: '#FFFFFF',
   },
   viewOptionTextActive: {
-    color: '#fff',
+    color: '#000000',
   },
+  
   todayButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#007AFF',
     borderRadius: 8,
   },
+  todayButtonDark: {
+    backgroundColor: '#0A84FF',
+  },
   todayButtonText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontWeight: '600',
+    fontSize: 15,
+  },
+  todayButtonTextDark: {
+    color: '#FFFFFF',
+  },
+
+  // ✅ FILTROS ESTILO APPLE
+  filtersRow: {
+    flexDirection: 'row',
+  },
+  filtersContent: {
+    gap: 8,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#E5E5EA',
+    borderRadius: 20,
+    gap: 6,
+  },
+  filterChipDark: {
+    backgroundColor: '#1C1C1E',
+  },
+  filterChipActive: {
+    backgroundColor: '#34C759',
+  },
+  filterChipActiveLight: {
+    backgroundColor: '#34C759',
+  },
+  filterChipActiveDark: {
+    backgroundColor: '#30D158',
+  },
+  filterChipText: {
     fontSize: 14,
+    fontWeight: '600',
+    color: '#8E8E93',
+  },
+  filterChipTextDark: {
+    color: '#8E8E93',
+  },
+  filterChipTextActive: {
+    color: '#FFFFFF',
   },
 
   content: {
@@ -774,114 +1114,129 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
 
+  // ✅ VISTA DE MES
   weekDays: {
     flexDirection: 'row',
     marginBottom: 8,
   },
   weekDay: {
-    flex: 1,
     textAlign: 'center',
     fontSize: 12,
     fontWeight: '600',
-    color: '#999',
+    color: '#8E8E93',
     paddingVertical: 8,
   },
   weekDayDark: {
-    color: '#666',
+    color: '#8E8E93',
   },
   weekDaySunday: {
-    color: '#8B5CF6',
+    color: '#8E4EC6',
+    fontWeight: '700',
+  },
+  weekDaySundayDark: {
+    color: '#BF5AF2',
     fontWeight: '700',
   },
   weekDaySaturday: {
-    color: '#2196F3',
+    color: '#007AFF',
+    fontWeight: '700',
+  },
+  weekDaySaturdayDark: {
+    color: '#0A84FF',
     fontWeight: '700',
   },
   
   daysGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
     padding: 8,
     marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowRadius: 4,
+    elevation: 2,
   },
   daysGridDark: {
-    backgroundColor: '#1c1c1e',
+    backgroundColor: '#1C1C1E',
   },
   
-  // ✅ ESTILOS FINALES ELEGANTES
   dayCell: {
-    width: '14.285714%',
-    aspectRatio: 1,
+    height: 50,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 8,
-    margin: 1,
+    marginBottom: 2,
     position: 'relative',
-    minHeight: 40,
+  },
+  
+  dayNumberContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 32,
+    height: 32,
+  },
+  
+  todayCircle: {
+    backgroundColor: '#FF3B30',
+    borderRadius: 16,
+  },
+  todayCircleDark: {
+    backgroundColor: '#FF453A',
+    borderRadius: 16,
   },
   
   selectedDay: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#E5E5EA',
+    borderRadius: 8,
   },
-  
-  todayDay: {
-    backgroundColor: '#2196F3',
-  },
-  
-  sundayDay: {
-    backgroundColor: '#F3E5F5',
-    borderWidth: 2,
-    borderColor: '#8B5CF6',
-  },
-  
-  saturdayDay: {
-    backgroundColor: '#E3F2FD', // ✅ AZUL CLARO ELEGANTE
-    borderWidth: 2,
-    borderColor: '#2196F3',
-  },
-  
-  otherMonthDay: {
-    opacity: 0.3,
+  selectedDayDark: {
+    backgroundColor: '#2C2C2E',
+    borderRadius: 8,
   },
   
   dayNumber: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#000',
+    color: '#000000',
     textAlign: 'center',
   },
   
   dayNumberDark: {
-    color: '#fff',
+    color: '#FFFFFF',
   },
   
   selectedDayText: {
-    color: '#fff',
+    color: '#000000',
+    fontWeight: '700',
   },
   
   todayDayText: {
-    color: '#fff',
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   
   sundayDayText: {
-    color: '#8B5CF6',
+    color: '#8E4EC6',
+    fontWeight: '700',
+  },
+  sundayDayTextDark: {
+    color: '#BF5AF2',
     fontWeight: '700',
   },
   
   saturdayDayText: {
-    color: '#1976D2', // ✅ AZUL OSCURO ELEGANTE
+    color: '#007AFF',
+    fontWeight: '700',
+  },
+  saturdayDayTextDark: {
+    color: '#0A84FF',
     fontWeight: '700',
   },
   
   otherMonthText: {
-    color: '#ccc',
+    color: '#C7C7CC',
   },
   
   eventIndicators: {
@@ -900,7 +1255,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 2,
     right: 2,
-    backgroundColor: 'rgba(139, 92, 246, 0.3)',
+    backgroundColor: 'rgba(142, 78, 198, 0.2)',
     borderRadius: 6,
     width: 12,
     height: 12,
@@ -908,19 +1263,232 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  dayEvents: {
-    backgroundColor: '#fff',
+  // ✅ VISTA DE SEMANA MEJORADA ESTILO APPLE
+  weekContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 20,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  weekContainerDark: {
+    backgroundColor: '#1C1C1E',
+  },
+
+  weekHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#C6C6C8',
+    paddingVertical: 12,
+  },
+  weekHeaderDark: {
+    backgroundColor: '#1C1C1E',
+    borderBottomColor: '#38383A',
+  },
+
+  timeColumnHeader: {
+    width: 60,
+  },
+
+  dayColumnHeader: {
+    flex: 1,
+    alignItems: 'center',
+  },
+
+  weekDayLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8E8E93',
+    marginBottom: 4,
+  },
+  weekDayLabelDark: {
+    color: '#8E8E93',
+  },
+
+  weekDayNumber: {
+    width: 32,
+    height: 32,
     borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  selectedCircle: {
+    backgroundColor: '#E5E5EA',
+  },
+  selectedCircleDark: {
+    backgroundColor: '#2C2C2E',
+  },
+
+  weekDayNumberText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  weekDayNumberTextDark: {
+    color: '#FFFFFF',
+  },
+  weekDayNumberTextActive: {
+    color: '#FFFFFF',
+  },
+
+  weekGrid: {
+    flex: 1,
+  },
+
+  // ✅ NUEVA ESTRUCTURA PARA VISTA DE SEMANA
+  weekContent: {
+    position: 'relative',
+    height: 16 * 60, // 16 horas × 60 minutos
+  },
+
+  timeLinesContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+
+  timeSlot: {
+    height: 60,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#F2F2F2',
+  },
+  timeSlotDark: {
+    borderBottomColor: '#38383A',
+  },
+
+  timeColumn: {
+    width: 60,
+    alignItems: 'center',
+    paddingTop: 4,
+  },
+
+  hourLabel: {
+    fontSize: 11,
+    color: '#8E8E93',
+    fontWeight: '500',
+  },
+  hourLabelDark: {
+    color: '#8E8E93',
+  },
+
+  timeLine: {
+    flex: 1,
+    height: 0.5,
+    backgroundColor: '#F2F2F2',
+    marginTop: 8,
+  },
+  timeLineDark: {
+    backgroundColor: '#38383A',
+  },
+
+  eventsContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+
+  dayEventsColumn: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+  },
+
+  // ✅ EVENTOS EN VISTA SEMANAL MEJORADOS
+  weekEventCard: {
+    position: 'absolute',
+    left: 4,
+    right: 4,
+    borderRadius: 6,
+    padding: 6,
+    borderLeftWidth: 3,
+    borderLeftColor: 'rgba(255,255,255,0.4)',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+
+  weekEventCardTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 2,
+  },
+
+  weekEventCardTime: {
+    fontSize: 9,
+    color: '#FFFFFF',
+    opacity: 0.9,
+    marginBottom: 2,
+  },
+
+  weekEventCardLocation: {
+    fontSize: 8,
+    color: '#FFFFFF',
+    opacity: 0.8,
+  },
+
+  // ✅ LÍNEA DE TIEMPO ACTUAL MEJORADA
+  currentTimeLine: {
+    position: 'absolute',
+    top: 300, // Posición aproximada de 11:00 AM
+    left: 0,
+    right: 0,
+    height: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  currentTimeLineDark: {},
+  currentTimeDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#FF3B30',
+    marginLeft: 54,
+    marginRight: 6,
+  },
+  currentTimeDotDark: {
+    backgroundColor: '#FF453A',
+  },
+  currentTimeLineBar: {
+    flex: 1,
+    height: 2,
+    backgroundColor: '#FF3B30',
+    marginRight: 16,
+  },
+  currentTimeLineBarDark: {
+    backgroundColor: '#FF453A',
+  },
+
+  // ✅ EVENTOS DEL DÍA SELECCIONADO (VISTA MES)
+  dayEvents: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
     padding: 16,
     marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
+    shadowRadius: 4,
+    elevation: 2,
   },
   dayEventsDark: {
-    backgroundColor: '#1c1c1e',
+    backgroundColor: '#1C1C1E',
   },
   dayEventsHeader: {
     flexDirection: 'row',
@@ -929,9 +1497,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   dayEventsTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
-    color: '#000',
+    color: '#000000',
+  },
+  dayEventsTitleDark: {
+    color: '#FFFFFF',
   },
   eventStats: {
     flexDirection: 'row',
@@ -939,56 +1510,68 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   eventCount: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 15,
+    color: '#8E8E93',
   },
+  eventCountDark: {
+    color: '#8E8E93',
+  },
+  
   overtimeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    backgroundColor: 'rgba(142, 78, 198, 0.1)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
     gap: 4,
+  },
+  overtimeBadgeDark: {
+    backgroundColor: 'rgba(191, 90, 242, 0.2)',
   },
   overtimeBadgeText: {
     fontSize: 11,
-    color: '#8B5CF6',
+    color: '#8E4EC6',
     fontWeight: '600',
   },
+  overtimeBadgeTextDark: {
+    color: '#BF5AF2',
+  },
+  
   saturdayBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
     gap: 4,
   },
+  saturdayBadgeDark: {
+    backgroundColor: 'rgba(10, 132, 255, 0.2)',
+  },
   saturdayBadgeText: {
     fontSize: 11,
-    color: '#2196F3',
+    color: '#007AFF',
     fontWeight: '600',
+  },
+  saturdayBadgeTextDark: {
+    color: '#0A84FF',
   },
   
   eventCard: {
     flexDirection: 'row',
-    backgroundColor: '#f9f9f9',
-    borderRadius: 12,
+    backgroundColor: '#F2F2F7',
+    borderRadius: 10,
     marginBottom: 12,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
   },
   eventCardDark: {
-    backgroundColor: '#2c2c2e',
+    backgroundColor: '#2C2C2E',
   },
   overtimeEventCard: {
-    borderLeftWidth: 2,
-    borderLeftColor: '#8B5CF6',
+    borderLeftWidth: 3,
+    borderLeftColor: '#8E4EC6',
   },
   
   priorityBar: {
@@ -1008,8 +1591,11 @@ const styles = StyleSheet.create({
   eventTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#000',
+    color: '#000000',
     flex: 1,
+  },
+  eventTitleDark: {
+    color: '#FFFFFF',
   },
   eventIcons: {
     flexDirection: 'row',
@@ -1017,22 +1603,34 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   eventTime: {
-    fontSize: 13,
-    color: '#666',
+    fontSize: 14,
+    color: '#8E8E93',
     marginBottom: 4,
+  },
+  eventTimeDark: {
+    color: '#8E8E93',
   },
   overtimeLabel: {
-    color: '#8B5CF6',
+    color: '#8E4EC6',
     fontWeight: '600',
   },
+  overtimeLabelDark: {
+    color: '#BF5AF2',
+  },
   eventTechnician: {
-    fontSize: 13,
-    color: '#666',
+    fontSize: 14,
+    color: '#8E8E93',
     marginBottom: 4,
   },
+  eventTechnicianDark: {
+    color: '#8E8E93',
+  },
   eventLocation: {
-    fontSize: 13,
-    color: '#666',
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  eventLocationDark: {
+    color: '#8E8E93',
   },
   
   noEvents: {
@@ -1040,20 +1638,22 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   noEventsText: {
-    fontSize: 14,
-    color: '#999',
+    fontSize: 16,
+    color: '#C7C7CC',
     marginTop: 12,
     textAlign: 'center',
   },
+  noEventsTextDark: {
+    color: '#48484A',
+  },
   noEventsSubtext: {
-    fontSize: 12,
-    color: '#666',
+    fontSize: 14,
+    color: '#8E8E93',
     marginTop: 8,
     textAlign: 'center',
     fontStyle: 'italic',
   },
-  
-  textDark: {
-    color: '#fff',
+  noEventsSubtextDark: {
+    color: '#8E8E93',
   },
 });
