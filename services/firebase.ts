@@ -1,111 +1,63 @@
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  onSnapshot,
-  orderBy,
-  query,
-  Timestamp,
-  updateDoc
-} from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { initializeApp } from 'firebase/app';
+import { getReactNativePersistence, initializeAuth } from 'firebase/auth';
+import { getFirestore, Timestamp } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
-// ✅ CORREGIR ESTA LÍNEA - Cambiar la ruta
-import { COLLECTIONS, db, MonitoringEvent } from '../firebase';
-// Si firebase.ts está en la raíz, usa: ../firebase
-// Si está en otra carpeta, ajusta la ruta según corresponda
+// ✅ Configuración de Firebase
+const firebaseConfig = {
+  apiKey: "AIzaSyAcuR-wQo_wKl4GQjWIiO3aheCzp5SyaeM",
+  authDomain: "gps-tracking-lordfoz.firebaseapp.com",
+  projectId: "gps-tracking-lordfoz",
+  storageBucket: "gps-tracking-lordfoz.firebasestorage.app",
+  messagingSenderId: "47375221891",
+  appId: "1:47375221891:web:f855e5494e37cf14cec7b6"
+};
 
-export class EventService {
-  
-  // ✅ Crear nuevo evento
-  static async createEvent(eventData: Omit<MonitoringEvent, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
-    try {
-      console.log('📝 Creando evento:', eventData);
-      const docRef = await addDoc(collection(db, COLLECTIONS.EVENTS), {
-        ...eventData,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now()
-      });
-      console.log('✅ Evento creado con ID:', docRef.id);
-      return docRef.id;
-    } catch (error) {
-      console.error('❌ Error creando evento:', error);
-      throw error;
-    }
-  }
+console.log('🔥 Inicializando Firebase...');
 
-  // ✅ Escuchar cambios en tiempo real
-  static subscribeToEvents(callback: (events: MonitoringEvent[]) => void) {
-    console.log('🔄 Iniciando suscripción en tiempo real...');
-    const q = query(
-      collection(db, COLLECTIONS.EVENTS),
-      orderBy('date', 'asc'),
-      orderBy('startTime', 'asc')
-    );
+// ✅ Inicializar Firebase SOLO UNA VEZ
+const app = initializeApp(firebaseConfig);
 
-    return onSnapshot(q, (querySnapshot) => {
-      const events: MonitoringEvent[] = [];
-      querySnapshot.forEach((docSnapshot) => {
-        events.push({ id: docSnapshot.id, ...docSnapshot.data() } as MonitoringEvent);
-      });
-      console.log(`🔄 Eventos actualizados: ${events.length} eventos`);
-      callback(events);
-    }, (error) => {
-      console.error('❌ Error en suscripción a eventos:', error);
-    });
-  }
+// ✅ Inicializar Auth con persistencia de AsyncStorage
+const auth = initializeAuth(app, {
+  persistence: getReactNativePersistence(AsyncStorage)
+});
 
-  // ✅ Actualizar evento
-  static async updateEvent(eventId: string, updateData: Partial<MonitoringEvent>): Promise<void> {
-    try {
-      console.log('📝 Actualizando evento:', eventId);
-      const eventRef = doc(db, COLLECTIONS.EVENTS, eventId);
-      await updateDoc(eventRef, {
-        ...updateData,
-        updatedAt: Timestamp.now()
-      });
-      console.log('✅ Evento actualizado');
-    } catch (error) {
-      console.error('❌ Error actualizando evento:', error);
-      throw error;
-    }
-  }
+// ✅ Inicializar Firestore
+const db = getFirestore(app);
 
-  // ✅ Eliminar evento
-  static async deleteEvent(eventId: string): Promise<void> {
-    try {
-      console.log('🗑️ Eliminando evento:', eventId);
-      await deleteDoc(doc(db, COLLECTIONS.EVENTS, eventId));
-      console.log('✅ Evento eliminado');
-    } catch (error) {
-      console.error('❌ Error eliminando evento:', error);
-      throw error;
-    }
-  }
+// ✅ Inicializar Storage
+const storage = getStorage(app);
 
-  // ✅ Obtener todos los eventos
-  static async getAllEvents(): Promise<MonitoringEvent[]> {
-    try {
-      console.log('📊 Obteniendo todos los eventos...');
-      const querySnapshot = await getDocs(
-        query(
-          collection(db, COLLECTIONS.EVENTS),
-          orderBy('date', 'asc'),
-          orderBy('startTime', 'asc')
-        )
-      );
-      
-      const events: MonitoringEvent[] = [];
-      querySnapshot.forEach((docSnapshot) => {
-        events.push({ id: docSnapshot.id, ...docSnapshot.data() } as MonitoringEvent);
-      });
-      
-      console.log(`✅ ${events.length} eventos obtenidos`);
-      return events;
-    } catch (error) {
-      console.error('❌ Error obteniendo eventos:', error);
-      throw error;
-    }
-  }
+console.log('✅ Firebase inicializado correctamente');
+console.log('📦 Project ID:', firebaseConfig.projectId);
+
+// ✅ Constantes para las colecciones
+export const COLLECTIONS = {
+  EVENTS: 'events',
+  USERS: 'users',
+  LOCATIONS: 'locations',
+  ROUTES: 'routes'
+};
+
+// ✅ Interface para MonitoringEvent
+export interface MonitoringEvent {
+  id?: string;
+  title: string;
+  date: string;
+  startTime: string;
+  endTime?: string;
+  description?: string;
+  location?: string;
+  type?: 'monitoring' | 'maintenance' | 'inspection';
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  status?: 'pending' | 'in-progress' | 'completed' | 'cancelled';
+  assignedTo?: string;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
 }
+
+// ✅ Exportar todo lo necesario
+export { auth, db, storage };
+export default app;

@@ -13,9 +13,12 @@ import {
   View
 } from 'react-native';
 
+import { MonitoringEvent } from '../services/firebase';
+
 interface CreateEventModalProps {
   isVisible: boolean;
   onClose: () => void;
+  onCreateEvent: (eventData: Omit<MonitoringEvent, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
   selectedDate: Date;
   isDark: boolean;
 }
@@ -26,7 +29,7 @@ interface NewEvent {
   startTime: string;
   endTime: string;
   technician: string;
-  matrix: string;
+  type: 'aire' | 'agua' | 'suelo' | 'ruido' | 'monitoring';
   priority: 'high' | 'medium' | 'low';
   location: string;
 }
@@ -34,6 +37,7 @@ interface NewEvent {
 export const CreateEventModal: React.FC<CreateEventModalProps> = ({
   isVisible,
   onClose,
+  onCreateEvent,
   selectedDate,
   isDark
 }) => {
@@ -46,10 +50,12 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
     startTime: '08:00',
     endTime: '10:00',
     technician: '',
-    matrix: 'aire',
+    type: 'aire',
     priority: 'medium',
     location: ''
   });
+
+  const [isSaving, setIsSaving] = useState(false);
 
   const technicians = [
     { id: 'tech001', name: 'Carlos Mendoza' },
@@ -134,43 +140,62 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
     return true;
   };
 
-  const handleSave = () => {
-    if (!validateForm()) return;
+  const handleSave = async () => {
+    try {
+      if (!validateForm()) return;
 
-    const year = selectedDate.getFullYear();
-    const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
-    const day = String(selectedDate.getDate()).padStart(2, '0');
-    const dateString = `${year}-${month}-${day}`;
+      setIsSaving(true);
 
-    const newEvent = {
-      ...formData,
-      date: dateString,
-      id: Date.now().toString(),
-      status: 'scheduled',
-      createdBy: 'cymperu',
-      createdAt: new Date(),
-      isOvertime: selectedDate.getDay() === 0 || selectedDate.getDay() === 6
-    };
+      const year = selectedDate.getFullYear();
+      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+      const day = String(selectedDate.getDate()).padStart(2, '0');
+      const dateString = `${year}-${month}-${day}`;
 
-    console.log('💾 Guardando evento:', newEvent);
+      const eventData: Omit<MonitoringEvent, 'id' | 'createdAt' | 'updatedAt'> = {
+        title: formData.title.trim(),
+        description: formData.description?.trim() || '',
+        date: dateString,
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        location: formData.location.trim(),
+        type: formData.type,
+        priority: formData.priority,
+        status: 'scheduled',
+        assignedTo: formData.technician,
+        createdBy: 'cymperu',
+        userId: 'user-cymperu-id'
+      };
 
-    Alert.alert(
-      'Éxito',
-      'Monitoreo programado correctamente',
-      [{ text: 'OK', onPress: () => {
-        setFormData({
-          title: '',
-          description: '',
-          startTime: '08:00',
-          endTime: '10:00',
-          technician: '',
-          matrix: 'aire',
-          priority: 'medium',
-          location: ''
-        });
-        onClose();
-      }}]
-    );
+      await onCreateEvent(eventData);
+
+      setFormData({
+        title: '',
+        description: '',
+        startTime: '08:00',
+        endTime: '10:00',
+        technician: '',
+        type: 'aire',
+        priority: 'medium',
+        location: ''
+      });
+
+      Alert.alert(
+        'Éxito',
+        'Monitoreo programado correctamente',
+        [{ text: 'OK', onPress: onClose }]
+      );
+
+    } catch (error) {
+      console.error('Error al guardar evento:', error);
+      
+      Alert.alert(
+        'Error',
+        'No se pudo guardar el evento. Por favor, intenta de nuevo.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (!isVisible) return null;
@@ -203,7 +228,10 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
               {formatSelectedDate()}
             </Text>
           </View>
-          <TouchableOpacity onPress={onClose} style={[styles.closeButton, isDark && styles.closeButtonDark]}>
+          <TouchableOpacity 
+            onPress={onClose} 
+            style={[styles.closeButton, isDark && styles.closeButtonDark]}
+          >
             <Ionicons name="close" size={24} color={isDark ? '#fff' : '#666'} />
           </TouchableOpacity>
         </View>
@@ -232,19 +260,19 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                   key={matrix.id}
                   style={[
                     styles.optionCard,
-                    formData.matrix === matrix.id && styles.optionCardSelected,
+                    formData.type === matrix.id && styles.optionCardSelected,
                     isDark && styles.optionCardDark
                   ]}
-                  onPress={() => setFormData(prev => ({ ...prev, matrix: matrix.id }))}
+                  onPress={() => setFormData(prev => ({ ...prev, type: matrix.id as any }))}
                 >
                   <Ionicons
                     name={matrix.icon as any}
                     size={20}
-                    color={formData.matrix === matrix.id ? '#4CAF50' : (isDark ? '#666' : '#999')}
+                    color={formData.type === matrix.id ? '#4CAF50' : (isDark ? '#666' : '#999')}
                   />
                   <Text style={[
                     styles.optionText,
-                    formData.matrix === matrix.id && styles.optionTextSelected,
+                    formData.type === matrix.id && styles.optionTextSelected,
                     isDark && styles.optionTextDark
                   ]}>
                     {matrix.name}
@@ -384,6 +412,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
             <TouchableOpacity
               style={[styles.cancelButton, isDark && styles.cancelButtonDark]}
               onPress={onClose}
+              disabled={isSaving}
             >
               <Text style={[styles.cancelButtonText, isDark && styles.cancelButtonTextDark]}>
                 Cancelar
@@ -391,11 +420,23 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.saveButton}
+              style={[
+                styles.saveButton,
+                isSaving && styles.saveButtonDisabled
+              ]}
               onPress={handleSave}
+              disabled={isSaving}
             >
-              <Ionicons name="checkmark" size={20} color="#fff" />
-              <Text style={styles.saveButtonText}>Programar</Text>
+              {isSaving ? (
+                <>
+                  <Text style={styles.saveButtonText}>Guardando...</Text>
+                </>
+              ) : (
+                <>
+                  <Ionicons name="checkmark" size={20} color="#fff" />
+                  <Text style={styles.saveButtonText}>Programar</Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
 
@@ -406,6 +447,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
   );
 };
 
+// ... (todos los estilos iguales que antes)
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -676,6 +718,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#4CAF50',
     gap: 8,
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#999',
+    opacity: 0.6,
   },
   saveButtonText: {
     fontSize: 16,

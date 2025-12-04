@@ -1,5 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useRef, useState } from 'react';
+import { Picker } from '@react-native-picker/picker';
+import { onAuthStateChanged } from 'firebase/auth';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
   Modal,
@@ -13,13 +15,9 @@ import {
   useColorScheme,
   View,
 } from 'react-native';
-// ✅ AGREGAR ESTE IMPORT
-import { Picker } from '@react-native-picker/picker';
-import { CreateEventModal } from './CreateEventModal';
-
-// ✅ IMPORTAR FIRESTORE Y HOOK
-import { MonitoringEvent } from '../firebase';
 import { useEvents } from '../hooks/useEvents';
+import { auth, MonitoringEvent } from '../services/firebase';
+import { CreateEventModal } from './CreateEventModal';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -29,7 +27,6 @@ export default function CalendarView() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   
-  // ✅ USAR DATOS REALES DE FIRESTORE
   const { events: firestoreEvents, loading, error, createEvent } = useEvents();
   
   const today = new Date();
@@ -38,8 +35,6 @@ export default function CalendarView() {
   const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [matrixFilter, setMatrixFilter] = useState<MatrixFilter>('all');
-  
-  // ✅ NUEVOS ESTADOS
   const [showMonthPicker, setShowMonthPicker] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -51,226 +46,163 @@ export default function CalendarView() {
   const weekScrollRef = useRef<ScrollView>(null);
   const daysScrollRef = useRef<ScrollView>(null);
 
-  // ✅ COLORES DEL TEMA (mismo que el menú inferior)
-  const THEME_COLOR = '#4CAF50'; // Verde como el ícono del calendario
+  // Verificación de autenticación silenciosa
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      // Autenticación manejada silenciosamente
+    });
+    return unsubscribe;
+  }, []);
+
+  const extendedDays = useMemo(() => {
+    const generateExtendedWeeks = (weeksCount: number = 20) => {
+      const allDays: Date[] = [];
+      const startOffset = -Math.floor(weeksCount / 2);
+      
+      for (let weekOffset = startOffset; weekOffset < startOffset + weeksCount; weekOffset++) {
+        const referenceDate = new Date(currentDate);
+        referenceDate.setDate(currentDate.getDate() + (weekOffset * 7));
+        
+        const startOfWeek = new Date(referenceDate);
+        const day = startOfWeek.getDay();
+        const diff = startOfWeek.getDate() - day;
+        startOfWeek.setDate(diff);
+
+        for (let i = 0; i < 7; i++) {
+          const date = new Date(startOfWeek);
+          date.setDate(startOfWeek.getDate() + i);
+          allDays.push(date);
+        }
+      }
+      
+      return allDays;
+    };
+
+    return generateExtendedWeeks(20);
+  }, [currentDate]);
+
+  const weekDays = useMemo(() => {
+    const generateWeekDays = () => {
+      const startOfWeek = new Date(currentDate);
+      const day = startOfWeek.getDay();
+      const diff = startOfWeek.getDate() - day;
+      startOfWeek.setDate(diff);
+
+      const weekDays = [];
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(startOfWeek);
+        date.setDate(startOfWeek.getDate() + i);
+        weekDays.push(date);
+      }
+      return weekDays;
+    };
+
+    return generateWeekDays();
+  }, [currentDate]);
+
+  const calendarDays = useMemo(() => {
+    const generateCalendarDays = () => {
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      
+      const firstDayOfMonth = new Date(year, month, 1);
+      const startDay = firstDayOfMonth.getDay();
+      
+      const lastDayOfMonth = new Date(year, month + 1, 0);
+      const daysInMonth = lastDayOfMonth.getDate();
+      
+      const calendarDays: Date[] = [];
+      
+      for (let i = startDay - 1; i >= 0; i--) {
+        const prevMonthDay = new Date(year, month - 1, new Date(year, month, 0).getDate() - i);
+        calendarDays.push(prevMonthDay);
+      }
+      
+      for (let day = 1; day <= daysInMonth; day++) {
+        const currentDay = new Date(year, month, day);
+        calendarDays.push(currentDay);
+      }
+      
+      const totalDays = calendarDays.length;
+      const remainingDays = 42 - totalDays;
+      
+      for (let day = 1; day <= remainingDays; day++) {
+        const nextMonthDay = new Date(year, month + 1, day);
+        calendarDays.push(nextMonthDay);
+      }
+      
+      return calendarDays;
+    };
+
+    return generateCalendarDays();
+  }, [currentDate]);
+
+  useEffect(() => {
+    if (viewMode === 'week' && daysScrollRef.current && weekScrollRef.current && extendedDays.length > 0) {
+      const dayIndex = extendedDays.findIndex(date => isSameDate(date, selectedDate));
+      
+      if (dayIndex !== -1) {
+        const DAY_COLUMN_WIDTH = 100;
+        const scrollPosition = dayIndex * DAY_COLUMN_WIDTH;
+        
+        setTimeout(() => {
+          daysScrollRef.current?.scrollTo({
+            x: scrollPosition,
+            animated: true
+          });
+          
+          weekScrollRef.current?.scrollTo({
+            x: scrollPosition,
+            animated: true
+          });
+        }, 100);
+      }
+    }
+  }, [viewMode, selectedDate, extendedDays]);
+
+  const THEME_COLOR = '#4CAF50';
   const THEME_COLOR_DARK = '#4CAF50';
 
-  // ✅ DATOS MOCK COMO FALLBACK (solo si no hay conexión)
   const mockEventsFallback: MonitoringEvent[] = [
     {
-      id: '1',
-      title: 'Calidad de Aire - Centro',
-      date: '2025-11-05',
+      id: 'demo-1',
+      title: 'Monitoreo de Calidad de Aire',
+      date: '2025-11-20',
       startTime: '08:00',
       endTime: '10:30',
-      technician: 'Carlos Mendoza',
-      matrix: 'aire',
+      description: 'Medición de PM2.5 y PM10 en zona urbana',
+      location: 'Centro de Lima',
+      type: 'monitoring',
       priority: 'high',
-      status: 'completed',
-      location: 'Plaza de Armas, Lima'
+      status: 'scheduled'
     },
     {
-      id: '2',
-      title: 'Monitoreo de Agua',
-      date: '2025-11-05',
-      startTime: '14:00',
-      endTime: '16:00',
-      technician: 'Ana García',
-      matrix: 'agua',
-      priority: 'medium',
-      status: 'completed',
-      location: 'Río Rímac'
-    },
-    {
-      id: '10',
-      title: 'Monitoreo de Calidad de Agua - Urgente',
-      date: '2025-11-19',
-      startTime: '09:00',
-      endTime: '12:00',
-      technician: 'María López',
-      matrix: 'agua',
-      priority: 'high',
-      status: 'in-progress',
-      location: 'Río Chillón'
-    },
-    {
-      id: '11',
-      title: 'Inspección de Ruido Industrial',
-      date: '2025-11-19',
-      startTime: '14:00',
-      endTime: '17:00',
-      technician: 'Carlos Mendoza',
-      matrix: 'ruido',
-      priority: 'medium',
-      status: 'scheduled',
-      location: 'Zona Industrial Ate'
-    },
-    {
-      id: '12',
-      title: 'Análisis de Suelo Agrícola',
-      date: '2025-11-20',
-      startTime: '07:00',
-      endTime: '13:00',
-      technician: 'Luis Torres',
-      matrix: 'suelo',
-      priority: 'high',
-      status: 'scheduled',
-      location: 'Valle de Lurín'
-    },
-    {
-      id: '13',
-      title: 'Medición de Calidad de Aire',
-      date: '2025-11-20',
-      startTime: '15:00',
-      endTime: '18:00',
-      technician: 'Ana García',
-      matrix: 'aire',
-      priority: 'medium',
-      status: 'scheduled',
-      location: 'San Juan de Lurigancho'
-    },
-    {
-      id: '14',
-      title: 'Monitoreo Integral - Agua y Suelo',
+      id: 'demo-2',
+      title: 'Análisis de Calidad de Agua',
       date: '2025-11-21',
-      startTime: '08:00',
+      startTime: '14:00',
       endTime: '16:00',
-      technician: 'María López',
-      matrix: 'agua',
-      priority: 'high',
-      status: 'scheduled',
-      location: 'Planta Tratamiento La Chira'
+      description: 'Evaluación fisicoquímica del agua potable',
+      location: 'Planta de Tratamiento Huachipa',
+      type: 'monitoring',
+      priority: 'medium',
+      status: 'scheduled'
     },
     {
-      id: '15',
-      title: 'Evaluación de Ruido Ambiental',
+      id: 'demo-3',
+      title: 'Evaluación de Suelos Agrícolas',
       date: '2025-11-22',
       startTime: '09:00',
-      endTime: '14:00',
-      technician: 'Carlos Mendoza',
-      matrix: 'ruido',
-      priority: 'medium',
-      status: 'scheduled',
-      location: 'Centro Comercial Jockey Plaza',
-      isOvertime: true
-    },
-    {
-      id: '16',
-      title: 'Calidad de Aire - Weekend',
-      date: '2025-11-22',
-      startTime: '10:00',
-      endTime: '13:00',
-      technician: 'Ana García',
-      matrix: 'aire',
-      priority: 'low',
-      status: 'scheduled',
-      location: 'Parque Kennedy',
-      isOvertime: true
-    },
-    {
-      id: '17',
-      title: 'Monitoreo Especial - Domingo',
-      date: '2025-11-23',
-      startTime: '08:00',
       endTime: '12:00',
-      technician: 'Luis Torres',
-      matrix: 'agua',
+      description: 'Análisis de metales pesados en suelos',
+      location: 'Valle de Lurín',
+      type: 'monitoring',
       priority: 'high',
-      status: 'scheduled',
-      location: 'Playa Costa Verde',
-      isOvertime: true
-    },
-    {
-      id: '18',
-      title: 'Análisis de Suelo Contaminado',
-      date: '2025-11-25',
-      startTime: '06:00',
-      endTime: '14:00',
-      technician: 'María López',
-      matrix: 'suelo',
-      priority: 'high',
-      status: 'scheduled',
-      location: 'Exzona Industrial Callao'
-    },
-    {
-      id: '19',
-      title: 'Medición de Calidad de Aire - PM2.5',
-      date: '2025-11-26',
-      startTime: '07:00',
-      endTime: '11:00',
-      technician: 'Ana García',
-      matrix: 'aire',
-      priority: 'high',
-      status: 'scheduled',
-      location: 'Av. Abancay - Centro Lima'
-    },
-    {
-      id: '20',
-      title: 'Evaluación Acústica Nocturna',
-      date: '2025-11-26',
-      startTime: '20:00',
-      endTime: '23:00',
-      technician: 'Carlos Mendoza',
-      matrix: 'ruido',
-      priority: 'medium',
-      status: 'scheduled',
-      location: 'Barranco - Zona Turística'
-    },
-    {
-      id: '21',
-      title: 'Monitoreo de Agua Potable',
-      date: '2025-11-27',
-      startTime: '09:00',
-      endTime: '15:00',
-      technician: 'Luis Torres',
-      matrix: 'agua',
-      priority: 'high',
-      status: 'scheduled',
-      location: 'Planta Huachipa'
-    },
+      status: 'scheduled'
+    }
   ];
 
-  // ✅ USAR EVENTOS REALES O FALLBACK
   const mockEvents = firestoreEvents.length > 0 ? firestoreEvents : mockEventsFallback;
-
-  // ✅ FUNCIÓN PARA CREAR EVENTO REAL
-  const handleCreateEvent = async (eventData: Omit<MonitoringEvent, 'id' | 'createdAt' | 'updatedAt'>) => {
-    try {
-      await createEvent(eventData);
-      setShowCreateModal(false);
-      console.log('✅ Evento creado exitosamente');
-    } catch (error) {
-      console.error('❌ Error creando evento:', error);
-      // Aquí puedes agregar una alerta o toast para mostrar el error
-    }
-  };
-
-  // ✅ MOSTRAR LOADING INICIAL
-  if (loading && firestoreEvents.length === 0) {
-    return (
-      <View style={[styles.container, isDark && styles.containerDark, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: isDark ? '#FFFFFF' : '#000000', fontSize: 18 }}>🔄 Cargando eventos...</Text>
-        <Text style={{ color: isDark ? '#8E8E93' : '#8E8E93', fontSize: 14, marginTop: 8 }}>
-          Conectando con la base de datos
-        </Text>
-      </View>
-    );
-  }
-
-  // ✅ MOSTRAR ERROR SI HAY PROBLEMA
-  if (error && firestoreEvents.length === 0) {
-    return (
-      <View style={[styles.container, isDark && styles.containerDark, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: '#FF0000', fontSize: 18, textAlign: 'center' }}>❌ Error de conexión</Text>
-        <Text style={{ color: isDark ? '#8E8E93' : '#8E8E93', fontSize: 14, marginTop: 8, textAlign: 'center' }}>
-          {error}
-        </Text>
-        <Text style={{ color: isDark ? '#8E8E93' : '#8E8E93', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
-          Usando datos de demostración
-        </Text>
-      </View>
-    );
-  }
 
   const matrixConfig = {
     aire: { 
@@ -305,7 +237,6 @@ export default function CalendarView() {
   ];
 
   const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-  const dayNamesShort = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
 
   const formatDateString = (date: Date): string => {
     const year = date.getFullYear();
@@ -331,120 +262,14 @@ export default function CalendarView() {
     return date.getDay() === 6;
   };
 
-  // ✅ FUNCIÓN PARA CREAR EVENTO DE PRUEBA (TEMPORAL)
-  const createTestEvent = async () => {
+  // Función principal para crear eventos
+  const handleCreateEvent = async (eventData: Omit<MonitoringEvent, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
-      const testEvent = {
-        title: 'Evento de Prueba - ' + new Date().toLocaleTimeString(),
-        date: formatDateString(selectedDate),
-        startTime: '09:00',
-        endTime: '11:00',
-        technician: 'Usuario Prueba',
-        matrix: 'agua' as const,
-        priority: 'high' as const,
-        status: 'scheduled' as const,
-        location: 'Lima Centro - Prueba'
-      };
-      
-      await handleCreateEvent(testEvent);
-      console.log('✅ Evento de prueba creado');
+      await createEvent(eventData);
+      setShowCreateModal(false);
     } catch (error) {
-      console.error('❌ Error creando evento de prueba:', error);
+      console.error('Error al crear evento:', error);
     }
-  };
-
-  // ✅ SINCRONIZAR VISTA SEMANA AL CAMBIAR selectedDate
-  useEffect(() => {
-    if (viewMode === 'week' && daysScrollRef.current && weekScrollRef.current) {
-      const dayIndex = extendedDays.findIndex(date => isSameDate(date, selectedDate));
-      
-      if (dayIndex !== -1) {
-        const scrollPosition = dayIndex * DAY_COLUMN_WIDTH;
-        
-        setTimeout(() => {
-          daysScrollRef.current?.scrollTo({
-            x: scrollPosition,
-            animated: true
-          });
-          
-          weekScrollRef.current?.scrollTo({
-            x: scrollPosition,
-            animated: true
-          });
-        }, 100);
-      }
-    }
-  }, [viewMode, selectedDate]);
-
-  const generateExtendedWeeks = (weeksCount: number = 20) => {
-    const allDays: Date[] = [];
-    const startOffset = -Math.floor(weeksCount / 2);
-    
-    for (let weekOffset = startOffset; weekOffset < startOffset + weeksCount; weekOffset++) {
-      const referenceDate = new Date(currentDate);
-      referenceDate.setDate(currentDate.getDate() + (weekOffset * 7));
-      
-      const startOfWeek = new Date(referenceDate);
-      const day = startOfWeek.getDay();
-      const diff = startOfWeek.getDate() - day;
-      startOfWeek.setDate(diff);
-
-      for (let i = 0; i < 7; i++) {
-        const date = new Date(startOfWeek);
-        date.setDate(startOfWeek.getDate() + i);
-        allDays.push(date);
-      }
-    }
-    
-    return allDays;
-  };
-
-  const generateWeekDays = () => {
-    const startOfWeek = new Date(currentDate);
-    const day = startOfWeek.getDay();
-    const diff = startOfWeek.getDate() - day;
-    startOfWeek.setDate(diff);
-
-    const weekDays = [];
-    for (let i = 0; i < 7; i++) {
-      const date = new Date(startOfWeek);
-      date.setDate(startOfWeek.getDate() + i);
-      weekDays.push(date);
-    }
-    return weekDays;
-  };
-
-  const generateCalendarDays = () => {
-    const year = currentDate.getFullYear();
-    const month = currentDate.getMonth();
-    
-    const firstDayOfMonth = new Date(year, month, 1);
-    const startDay = firstDayOfMonth.getDay();
-    
-    const lastDayOfMonth = new Date(year, month + 1, 0);
-    const daysInMonth = lastDayOfMonth.getDate();
-    
-    const calendarDays: Date[] = [];
-    
-    for (let i = startDay - 1; i >= 0; i--) {
-      const prevMonthDay = new Date(year, month - 1, new Date(year, month, 0).getDate() - i);
-      calendarDays.push(prevMonthDay);
-    }
-    
-    for (let day = 1; day <= daysInMonth; day++) {
-      const currentDay = new Date(year, month, day);
-      calendarDays.push(currentDay);
-    }
-    
-    const totalDays = calendarDays.length;
-    const remainingDays = 42 - totalDays;
-    
-    for (let day = 1; day <= remainingDays; day++) {
-      const nextMonthDay = new Date(year, month + 1, day);
-      calendarDays.push(nextMonthDay);
-    }
-    
-    return calendarDays;
   };
 
   const goToPrevious = () => {
@@ -478,6 +303,7 @@ export default function CalendarView() {
       const todayIndex = extendedDays.findIndex(date => isSameDate(date, today));
       
       if (todayIndex !== -1 && daysScrollRef.current && weekScrollRef.current) {
+        const DAY_COLUMN_WIDTH = 100;
         const scrollPosition = todayIndex * DAY_COLUMN_WIDTH;
         
         daysScrollRef.current.scrollTo({
@@ -493,14 +319,12 @@ export default function CalendarView() {
     }
   };
 
-  // ✅ ABRIR PICKER DE MES/AÑO
   const openMonthPicker = () => {
     setPickerMonth(viewMode === 'month' ? currentDate.getMonth() : visibleMonth);
     setPickerYear(viewMode === 'month' ? currentDate.getFullYear() : visibleYear);
     setShowMonthPicker(true);
   };
 
-  // ✅ APLICAR SELECCIÓN DE MES/AÑO
   const applyMonthYearSelection = () => {
     const newDate = new Date(pickerYear, pickerMonth, 1);
     setCurrentDate(newDate);
@@ -509,19 +333,19 @@ export default function CalendarView() {
     setShowMonthPicker(false);
   };
 
-  // ✅ BÚSQUEDA DE EVENTOS
-  const filteredEvents = mockEvents.filter(event => 
-    event.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    event.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    event.technician.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredEvents = mockEvents.filter(event => {
+    const searchTerm = searchQuery.toLowerCase();
+    return event.title.toLowerCase().includes(searchTerm) ||
+           event.location?.toLowerCase().includes(searchTerm) ||
+           event.description?.toLowerCase().includes(searchTerm);
+  });
 
   const getEventsForDate = (date: Date) => {
     const dateStr = formatDateString(date);
     let events = mockEvents.filter(event => event.date === dateStr);
     
     if (matrixFilter !== 'all') {
-      events = events.filter(event => event.matrix === matrixFilter);
+      events = events.filter(event => event.type === matrixFilter);
     }
     
     return events;
@@ -539,102 +363,63 @@ export default function CalendarView() {
     setShowCreateModal(false);
   };
 
-  const generateAllHours = () => {
-    const hours = [];
-    for (let i = 0; i <= 23; i++) {
-      const hour12 = i === 0 ? 12 : i > 12 ? i - 12 : i;
-      const ampm = i >= 12 ? 'p. m.' : 'a. m.';
-      
-      if (i === 12) {
-        hours.push({ hour24: i, display: 'Mediodía', short: '12 PM' });
-      } else {
-        hours.push({ 
-          hour24: i, 
-          display: `${hour12} ${ampm}`,
-          short: `${hour12}${ampm === 'a. m.' ? 'AM' : 'PM'}`
-        });
-      }
-    }
-    return hours;
-  };
-
-  const calculateEventLayout = (event: MonitoringEvent) => {
-    const startHour = parseInt(event.startTime.split(':')[0]);
-    const startMinutes = parseInt(event.startTime.split(':')[1]);
-    const endHour = parseInt(event.endTime.split(':')[0]);
-    const endMinutes = parseInt(event.endTime.split(':')[1]);
-    
-    const startPosition = (startHour * 60 + startMinutes);
-    const duration = (endHour - startHour) * 60 + (endMinutes - startMinutes);
-    
-    return {
-      top: startPosition,
-      height: Math.max(duration, 30),
-      duration: duration
-    };
-  };
-
-  const handleDaysScroll = (event: any) => {
-    const scrollX = event.nativeEvent.contentOffset.x;
-    const dayIndex = Math.round(scrollX / DAY_COLUMN_WIDTH);
-    
-    if (extendedDays[dayIndex]) {
-      const visibleDate = extendedDays[dayIndex];
-      setVisibleMonth(visibleDate.getMonth());
-      setVisibleYear(visibleDate.getFullYear());
-    }
-    
-    if (weekScrollRef.current) {
-      weekScrollRef.current.scrollTo({
-        x: scrollX,
-        animated: false
-      });
-    }
-  };
-
-  const calendarDays = generateCalendarDays();
-  const weekDays = generateWeekDays();
-  const extendedDays = generateExtendedWeeks(20);
   const selectedDateEvents = getEventsForDate(selectedDate);
   const currentMonth = currentDate.getMonth();
   const currentYear = currentDate.getFullYear();
-  const allHours = generateAllHours();
 
   const containerPadding = 32;
   const gridPadding = 16;
   const availableWidth = screenWidth - containerPadding - gridPadding;
   const cellWidth = Math.floor(availableWidth / 7);
-  const DAY_COLUMN_WIDTH = 100;
+
+  if (loading && firestoreEvents.length === 0) {
+    return (
+      <View style={[styles.container, isDark && styles.containerDark, styles.centerContainer]}>
+        <Ionicons name="sync" size={48} color={isDark ? '#8E8E93' : '#C7C7CC'} />
+        <Text style={[styles.loadingTitle, isDark && styles.loadingTitleDark]}>
+          Cargando eventos
+        </Text>
+        <Text style={[styles.loadingSubtitle, isDark && styles.loadingSubtitleDark]}>
+          Conectando con la base de datos...
+        </Text>
+      </View>
+    );
+  }
+
+  if (error && firestoreEvents.length === 0) {
+    return (
+      <View style={[styles.container, isDark && styles.containerDark, styles.centerContainer]}>
+        <Ionicons name="cloud-offline" size={48} color="#FF6B6B" />
+        <Text style={[styles.errorTitle, isDark && styles.errorTitleDark]}>
+          Conexión limitada
+        </Text>
+        <Text style={[styles.errorSubtitle, isDark && styles.errorSubtitleDark]}>
+          {error}
+        </Text>
+        <Text style={[styles.errorMessage, isDark && styles.errorMessageDark]}>
+          Mostrando datos de ejemplo
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, isDark && styles.containerDark]}>
-      {/* ✅ INDICADOR DE ESTADO DE FIREBASE */}
       {loading && (
-        <View style={{ 
-          position: 'absolute', 
-          top: Platform.OS === 'ios' ? 50 : StatusBar.currentHeight || 40, 
-          right: 16, 
-          zIndex: 1000,
-          backgroundColor: isDark ? '#1C1C1E' : '#FFFFFF',
-          paddingHorizontal: 8,
-          paddingVertical: 4,
-          borderRadius: 12,
-          shadowColor: '#000000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-          elevation: 3,
-        }}>
-          <Text style={{ color: isDark ? '#FFFFFF' : '#000000', fontSize: 12 }}>🔄 Sincronizando...</Text>
+        <View style={styles.syncIndicator}>
+          <View style={[styles.syncBadge, isDark && styles.syncBadgeDark]}>
+            <Ionicons name="sync" size={12} color={isDark ? '#FFFFFF' : '#000000'} />
+            <Text style={[styles.syncText, isDark && styles.syncTextDark]}>
+              Sincronizando
+            </Text>
+          </View>
         </View>
       )}
 
-      {/* HEADER ALINEADO A LA IZQUIERDA */}
       <View style={[styles.header, isDark && styles.headerDark]}>
-        <View style={{ height: Platform.OS === 'ios' ? 50 : StatusBar.currentHeight || 40 }} />
+        <View style={styles.statusBarSpacer} />
         
         <View style={styles.headerContent}>
-          {/* ✅ TÍTULO ALINEADO A LA IZQUIERDA */}
           <TouchableOpacity onPress={openMonthPicker} style={styles.monthYearContainer}>
             <Text style={[styles.monthYear, isDark && styles.monthYearDark]}>
               {viewMode === 'month' 
@@ -646,11 +431,10 @@ export default function CalendarView() {
               name="chevron-down" 
               size={20} 
               color={isDark ? '#FFFFFF' : '#000000'} 
-              style={{ marginLeft: 6 }}
+              style={styles.chevronIcon}
             />
           </TouchableOpacity>
           
-          {/* ✅ ACCIONES ALINEADAS A LA DERECHA */}
           <View style={styles.headerActions}>
             <TouchableOpacity 
               style={styles.headerActionButton}
@@ -659,34 +443,28 @@ export default function CalendarView() {
               <Ionicons name="search-outline" size={20} color={isDark ? '#8E8E93' : '#8E8E93'} />
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.headerActionButton} onPress={openCreateModal}>
-              <Ionicons name="add" size={22} color={isDark ? THEME_COLOR_DARK : THEME_COLOR} />
-            </TouchableOpacity>
-
-            {/* ✅ BOTÓN DE PRUEBA TEMPORAL */}
+            {/* Botón principal para crear eventos */}
             <TouchableOpacity 
-              style={[styles.headerActionButton, { backgroundColor: 'orange', borderRadius: 8 }]} 
-              onPress={createTestEvent}
+              style={styles.headerActionButton} 
+              onPress={openCreateModal}
             >
-              <Text style={{ color: 'white', fontSize: 10 }}>TEST</Text>
+              <Ionicons name="add" size={22} color={isDark ? THEME_COLOR_DARK : THEME_COLOR} />
             </TouchableOpacity>
           </View>
         </View>
         
-        {/* ✅ SUBTITLE ALINEADO CON CONTROLES */}
         {viewMode === 'month' && (
           <View style={styles.subtitleContainer}>
             <Text style={[styles.subtitle, isDark && styles.subtitleDark]}>
               {mockEvents.filter(e => e.status === 'scheduled').length} monitoreos programados
               {firestoreEvents.length > 0 && (
-                <Text style={{ color: isDark ? THEME_COLOR_DARK : THEME_COLOR }}> • En vivo</Text>
+                <Text style={{ color: isDark ? THEME_COLOR_DARK : THEME_COLOR }}> • En tiempo real</Text>
               )}
             </Text>
           </View>
         )}
       </View>
 
-      {/* CONTROLES */}
       <View style={[styles.controlsContainer, isDark && styles.controlsContainerDark]}>
         <View style={styles.viewControls}>
           <View style={[styles.viewSelector, isDark && styles.viewSelectorDark]}>
@@ -725,12 +503,8 @@ export default function CalendarView() {
             </TouchableOpacity>
           </View>
 
-          {/* ✅ BOTÓN HOY CON COLOR DEL TEMA */}
           <TouchableOpacity 
-            style={[
-              styles.todayButton, 
-              { backgroundColor: isDark ? THEME_COLOR_DARK : THEME_COLOR }
-            ]} 
+            style={[styles.todayButton, { backgroundColor: isDark ? THEME_COLOR_DARK : THEME_COLOR }]} 
             onPress={goToToday}
           >
             <Text style={styles.todayButtonText}>Hoy</Text>
@@ -794,7 +568,6 @@ export default function CalendarView() {
         </ScrollView>
       </View>
 
-      {/* CONTENIDO */}
       <View style={styles.content}>
         {viewMode === 'month' ? (
           <ScrollView showsVerticalScrollIndicator={false}>
@@ -853,21 +626,24 @@ export default function CalendarView() {
 
                     {hasEvents(date) && (
                       <View style={styles.eventIndicators}>
-                        {dayEvents.slice(0, 3).map((event, idx) => (
-                          <View
-                            key={`${event.id}-${idx}`}
-                            style={[
-                              styles.eventDot,
-                              { backgroundColor: isDark ? matrixConfig[event.matrix].darkColor : matrixConfig[event.matrix].color }
-                            ]}
-                          />
-                        ))}
-                      </View>
-                    )}
-                    
-                    {isSundayDay && isCurrentMonth && !hasEvents(date) && (
-                      <View style={styles.sundayIndicator}>
-                        <Ionicons name="time-outline" size={10} color={isDark ? "#BF5AF2" : "#8E4EC6"} />
+                        {dayEvents.slice(0, 3).map((event, idx) => {
+                          const eventType = event.type || 'monitoring';
+                          const config = matrixConfig[eventType] || matrixConfig.aire;
+                          return (
+                            <View
+                              key={`${event.id}-${idx}`}
+                              style={[
+                                styles.eventDot,
+                                { backgroundColor: isDark ? config.darkColor : config.color }
+                              ]}
+                            />
+                          );
+                        })}
+                        {dayEvents.length > 3 && (
+                          <Text style={[styles.moreEventsText, isDark && styles.moreEventsTextDark]}>
+                            +{dayEvents.length - 3}
+                          </Text>
+                        )}
                       </View>
                     )}
                   </TouchableOpacity>
@@ -879,222 +655,314 @@ export default function CalendarView() {
               <View style={styles.dayEventsHeader}>
                 <Text style={[styles.dayEventsTitle, isDark && styles.dayEventsTitleDark]}>
                   {isSameDate(selectedDate, new Date()) ? 'Hoy' : 
-                   `${selectedDate.getDate()} ${monthNames[selectedDate.getMonth()]}`}
+                   `${selectedDate.getDate()} de ${monthNames[selectedDate.getMonth()]}`}
                 </Text>
                 <View style={styles.eventStats}>
                   <Text style={[styles.eventCount, isDark && styles.eventCountDark]}>
-                    {selectedDateEvents.length} eventos
+                    {selectedDateEvents.length} evento{selectedDateEvents.length !== 1 ? 's' : ''}
                   </Text>
-                  {isSunday(selectedDate) && (
-                    <View style={[styles.overtimeBadge, isDark && styles.overtimeBadgeDark]}>
-                      <Ionicons name="time" size={12} color={isDark ? "#BF5AF2" : "#8E4EC6"} />
-                      <Text style={[styles.overtimeBadgeText, isDark && styles.overtimeBadgeTextDark]}>Domingo</Text>
-                    </View>
-                  )}
-                  {isSaturday(selectedDate) && (
-                    <View style={[styles.saturdayBadge, isDark && styles.saturdayBadgeDark]}>
-                      <Ionicons name="calendar" size={12} color={isDark ? "#0A84FF" : "#007AFF"} />
-                      <Text style={[styles.saturdayBadgeText, isDark && styles.saturdayBadgeTextDark]}>Sábado</Text>
-                    </View>
-                  )}
                 </View>
               </View>
               
               {selectedDateEvents.length > 0 ? (
-                selectedDateEvents.map((event) => (
-                  <TouchableOpacity
-                    key={event.id}
-                    style={[
-                      styles.eventCard, 
-                      isDark && styles.eventCardDark,
-                      event.isOvertime && styles.overtimeEventCard
-                    ]}
-                  >
-                    <View style={[
-                      styles.priorityBar,
-                      { backgroundColor: isDark ? matrixConfig[event.matrix].darkColor : matrixConfig[event.matrix].color }
-                    ]} />
-                    
-                    <View style={styles.eventContent}>
-                      <View style={styles.eventHeader}>
-                        <Text style={[styles.eventTitle, isDark && styles.eventTitleDark]}>
-                          {event.title}
-                        </Text>
-                        <View style={styles.eventIcons}>
-                          <Ionicons
-                            name={matrixConfig[event.matrix].icon as any}
-                            size={16}
-                            color={isDark ? matrixConfig[event.matrix].darkColor : matrixConfig[event.matrix].color}
-                          />
-                          {event.isOvertime && (
-                            <Ionicons name="time" size={14} color={isDark ? "#BF5AF2" : "#8E4EC6"} />
-                          )}
+                selectedDateEvents.map((event) => {
+                  const eventType = event.type || 'monitoring';
+                  const config = matrixConfig[eventType] || matrixConfig.aire;
+                  
+                  return (
+                    <TouchableOpacity
+                      key={event.id}
+                      style={[styles.eventCard, isDark && styles.eventCardDark]}
+                    >
+                      <View style={[
+                        styles.priorityBar, 
+                        { backgroundColor: isDark ? config.darkColor : config.color }
+                      ]} />
+                      
+                      <View style={styles.eventContent}>
+                        <View style={styles.eventHeader}>
+                          <Text style={[styles.eventTitle, isDark && styles.eventTitleDark]}>
+                            {event.title}
+                          </Text>
+                          <View style={styles.eventIcons}>
+                            <Ionicons
+                              name={config.icon as any}
+                              size={16}
+                              color={isDark ? config.darkColor : config.color}
+                            />
+                            {event.priority === 'high' && (
+                              <Ionicons name="alert-circle" size={14} color="#FF6B6B" />
+                            )}
+                          </View>
                         </View>
-                      </View>
-                      
-                      <Text style={[styles.eventTime, isDark && styles.eventTimeDark]}>
-                        ⏰ {event.startTime} - {event.endTime}
-                        {event.isOvertime && (
-                          <Text style={[styles.overtimeLabel, isDark && styles.overtimeLabelDark]}> • Horas Extra</Text>
+                        
+                        <Text style={[styles.eventTime, isDark && styles.eventTimeDark]}>
+                          ⏰ {event.startTime} - {event.endTime || 'Sin hora fin'}
+                        </Text>
+                        
+                        {event.description && (
+                          <Text style={[styles.eventDescription, isDark && styles.eventDescriptionDark]}>
+                            📋 {event.description}
+                          </Text>
                         )}
-                      </Text>
-                      
-                      <Text style={[styles.eventTechnician, isDark && styles.eventTechnicianDark]}>
-                        👤 {event.technician}
-                      </Text>
-                      
-                      <Text style={[styles.eventLocation, isDark && styles.eventLocationDark]}>
-                        📍 {event.location}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                ))
+                        
+                        {event.location && (
+                          <Text style={[styles.eventLocation, isDark && styles.eventLocationDark]}>
+                            📍 {event.location}
+                          </Text>
+                        )}
+
+                        {event.status && (
+                          <View style={styles.statusContainer}>
+                            <View style={[
+                              styles.statusBadge,
+                              event.status === 'completed' && styles.statusCompleted,
+                              event.status === 'in-progress' && styles.statusInProgress,
+                              event.status === 'scheduled' && styles.statusScheduled,
+                              isDark && styles.statusBadgeDark
+                            ]}>
+                              <Text style={[
+                                styles.statusText,
+                                event.status === 'completed' && styles.statusTextCompleted,
+                                event.status === 'in-progress' && styles.statusTextInProgress,
+                                event.status === 'scheduled' && styles.statusTextScheduled
+                              ]}>
+                                {event.status === 'completed' ? 'Completado' :
+                                 event.status === 'in-progress' ? 'En progreso' :
+                                 event.status === 'scheduled' ? 'Programado' : 
+                                 event.status}
+                              </Text>
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
               ) : (
                 <View style={styles.noEvents}>
                   <Ionicons name="calendar-outline" size={48} color={isDark ? '#48484A' : '#C7C7CC'} />
                   <Text style={[styles.noEventsText, isDark && styles.noEventsTextDark]}>
                     No hay eventos programados
                   </Text>
-                  {matrixFilter !== 'all' && (
-                    <Text style={[styles.noEventsSubtext, isDark && styles.noEventsSubtextDark]}>
-                      Filtro activo: {matrixConfig[matrixFilter as keyof typeof matrixConfig]?.label}
-                    </Text>
-                  )}
+                  <Text style={[styles.noEventsSubtext, isDark && styles.noEventsSubtextDark]}>
+                    Toca el botón + para crear un nuevo monitoreo
+                  </Text>
                 </View>
               )}
             </View>
           </ScrollView>
         ) : (
+          // ✅ NUEVA IMPLEMENTACIÓN DE VISTA DE SEMANA
           <View style={[styles.weekViewContainer, isDark && styles.weekViewContainerDark]}>
-            <View style={[styles.weekHeaderFixed, isDark && styles.weekHeaderFixedDark]}>
-              <View style={[styles.timeHeaderCorner, isDark && styles.timeHeaderCornerDark]} />
-              <ScrollView
-                ref={weekScrollRef}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                scrollEventThrottle={16}
-                scrollEnabled={false}
-              >
-                {extendedDays.map((date, index) => {
-                  const isTodayDate = isToday(date);
-                  const isSelectedDate = isSameDate(date, selectedDate);
-                  const isSaturdayDay = date.getDay() === 6;
-                  const isSundayDay = date.getDay() === 0;
-                  
-                  return (
-                    <TouchableOpacity
-                      key={`header-${index}-${date.getTime()}`}
-                      style={[styles.dayHeaderColumn, { width: DAY_COLUMN_WIDTH }]}
-                      onPress={() => setSelectedDate(new Date(date))}
-                    >
-                      <Text style={[
-                        styles.dayHeaderLabel,
-                        isDark && styles.dayHeaderLabelDark,
-                        isSundayDay && (isDark ? styles.weekDaySundayDark : styles.weekDaySunday),
-                        isSaturdayDay && (isDark ? styles.weekDaySaturdayDark : styles.weekDaySaturday)
-                      ]}>
-                        {dayNamesShort[date.getDay()]}
-                      </Text>
-                      <View style={[
-                        styles.dayHeaderNumber,
-                        isTodayDate && (isDark ? styles.todayCircleDark : styles.todayCircle),
-                        isSelectedDate && !isTodayDate && (isDark ? styles.selectedCircleDark : styles.selectedCircle)
-                      ]}>
-                        <Text style={[
-                          styles.dayHeaderNumberText,
-                          isDark && styles.dayHeaderNumberTextDark,
-                          (isTodayDate || isSelectedDate) && styles.dayHeaderNumberTextActive
-                        ]}>
-                          {date.getDate()}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
+            
+            {/* Header de la semana */}
+            <View style={[styles.weekHeader, isDark && styles.weekHeaderDark]}>
+              <View style={styles.weekNavigation}>
+                <TouchableOpacity 
+                  style={[styles.weekNavButton, isDark && styles.weekNavButtonDark]}
+                  onPress={goToPrevious}
+                >
+                  <Ionicons name="chevron-back" size={20} color={isDark ? '#FFFFFF' : '#000000'} />
+                </TouchableOpacity>
+                
+                <Text style={[styles.weekTitle, isDark && styles.weekTitleDark]}>
+                  Semana del {weekDays[0].getDate()} de {monthNames[weekDays[0].getMonth()]}
+                </Text>
+                
+                <TouchableOpacity 
+                  style={[styles.weekNavButton, isDark && styles.weekNavButtonDark]}
+                  onPress={goToNext}
+                >
+                  <Ionicons name="chevron-forward" size={20} color={isDark ? '#FFFFFF' : '#000000'} />
+                </TouchableOpacity>
+              </View>
             </View>
 
-            <ScrollView style={styles.weekScrollContainer} showsVerticalScrollIndicator={false}>
-              <View style={styles.weekGridContainer}>
-                <View style={[styles.timeColumn, isDark && styles.timeColumnDark]}>
-                  {allHours.map((hour) => (
-                    <View key={`time-${hour.hour24}`} style={styles.timeSlot}>
-                      <Text style={[styles.timeLabel, isDark && styles.timeLabelDark]}>
-                        {hour.short}
+            {/* Días de la semana header */}
+            <View style={[styles.weekDaysHeader, isDark && styles.weekDaysHeaderDark]}>
+              {weekDays.map((date, index) => {
+                const isToday = isSameDate(date, new Date());
+                const isSelected = isSameDate(date, selectedDate);
+                const dayEvents = getEventsForDate(date);
+                
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    style={[
+                      styles.weekDayColumn,
+                      isSelected && (isDark ? styles.weekDaySelectedDark : styles.weekDaySelected)
+                    ]}
+                    onPress={() => setSelectedDate(new Date(date))}
+                  >
+                    <Text style={[
+                      styles.weekDayName,
+                      isDark && styles.weekDayNameDark,
+                      isToday && styles.weekDayToday
+                    ]}>
+                      {dayNames[date.getDay()]}
+                    </Text>
+                    <View style={[
+                      styles.weekDayNumber,
+                      isToday && (isDark ? styles.weekDayTodayCircleDark : styles.weekDayTodayCircle),
+                      isSelected && (isDark ? styles.weekDaySelectedCircleDark : styles.weekDaySelectedCircle)
+                    ]}>
+                      <Text style={[
+                        styles.weekDayNumberText,
+                        isDark && styles.weekDayNumberTextDark,
+                        isToday && styles.weekDayTodayText,
+                        isSelected && styles.weekDaySelectedText
+                      ]}>
+                        {date.getDate()}
                       </Text>
                     </View>
-                  ))}
-                </View>
+                    {dayEvents.length > 0 && (
+                      <View style={styles.weekEventIndicator}>
+                        <Text style={[styles.weekEventCount, isDark && styles.weekEventCountDark]}>
+                          {dayEvents.length}
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
-                <ScrollView
-                  ref={daysScrollRef}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  scrollEventThrottle={16}
-                  onScroll={handleDaysScroll}
-                >
-                  <View style={styles.daysContainer}>
-                    {allHours.map((hour) => (
-                      <View
-                        key={`grid-${hour.hour24}`}
-                        style={[
-                          styles.gridLine,
-                          isDark && styles.gridLineDark,
-                          { width: DAY_COLUMN_WIDTH * extendedDays.length }
-                        ]}
-                      />
-                    ))}
+            {/* Contenido de eventos de la semana */}
+            <ScrollView style={styles.weekContent} showsVerticalScrollIndicator={false}>
+              {weekDays.map((date, dayIndex) => {
+                const dayEvents = getEventsForDate(date);
+                const isToday = isSameDate(date, new Date());
+                const isSelected = isSameDate(date, selectedDate);
 
-                    {extendedDays.map((date, dayIndex) => {
-                      const dayEvents = getEventsForDate(date);
-                      
+                if (dayEvents.length === 0) return null;
+
+                return (
+                  <View 
+                    key={`week-day-${dayIndex}`}
+                    style={[
+                      styles.weekDaySection,
+                      isDark && styles.weekDaySectionDark,
+                      isSelected && styles.weekDaySectionSelected
+                    ]}
+                  >
+                    <View style={styles.weekDaySectionHeader}>
+                      <Text style={[
+                        styles.weekDaySectionTitle,
+                        isDark && styles.weekDaySectionTitleDark,
+                        isToday && (isDark ? styles.weekDaySectionTodayDark : styles.weekDaySectionToday)
+                      ]}>
+                        {isToday ? 'Hoy' : `${dayNames[date.getDay()]}, ${date.getDate()}`}
+                      </Text>
+                      <Text style={[styles.weekDaySectionCount, isDark && styles.weekDaySectionCountDark]}>
+                        {dayEvents.length} evento{dayEvents.length !== 1 ? 's' : ''}
+                      </Text>
+                    </View>
+
+                    {dayEvents.map((event, eventIndex) => {
+                      const eventType = event.type || 'monitoring';
+                      const config = matrixConfig[eventType] || matrixConfig.aire;
+
                       return (
-                        <View
-                          key={`day-${dayIndex}-${date.getTime()}`}
-                          style={[
-                            styles.dayColumn,
-                            isDark && styles.dayColumnDark,
-                            { width: DAY_COLUMN_WIDTH, left: dayIndex * DAY_COLUMN_WIDTH }
-                          ]}
+                        <TouchableOpacity
+                          key={`week-event-${event.id}`}
+                          style={[styles.weekEventCard, isDark && styles.weekEventCardDark]}
                         >
-                          {dayEvents.map((event) => {
-                            const layout = calculateEventLayout(event);
-                            
-                            return (
-                              <TouchableOpacity
-                                key={`event-${event.id}-${dayIndex}`}
-                                style={[
-                                  styles.weekEvent,
-                                  {
-                                    top: layout.top,
-                                    height: layout.height,
-                                    backgroundColor: isDark 
-                                      ? matrixConfig[event.matrix].darkColor 
-                                      : matrixConfig[event.matrix].color,
-                                  }
-                                ]}
-                              >
-                                <Text style={styles.weekEventTitle} numberOfLines={2}>
-                                  {event.title}
-                                </Text>
-                                <Text style={styles.weekEventTime}>
+                          <View style={[
+                            styles.weekEventTimeBar,
+                            { backgroundColor: isDark ? config.darkColor : config.color }
+                          ]} />
+                          
+                          <View style={styles.weekEventContent}>
+                            <View style={styles.weekEventHeader}>
+                              <View style={styles.weekEventTimeContainer}>
+                                <Text style={[styles.weekEventTime, isDark && styles.weekEventTimeDark]}>
                                   {event.startTime}
                                 </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
+                                {event.endTime && (
+                                  <Text style={[styles.weekEventTimeDivider, isDark && styles.weekEventTimeDividerDark]}>
+                                    - {event.endTime}
+                                  </Text>
+                                )}
+                              </View>
+                              <View style={styles.weekEventIcons}>
+                                <Ionicons
+                                  name={config.icon as any}
+                                  size={16}
+                                  color={isDark ? config.darkColor : config.color}
+                                />
+                                {event.priority === 'high' && (
+                                  <Ionicons name="alert-circle" size={14} color="#FF6B6B" />
+                                )}
+                              </View>
+                            </View>
+
+                            <Text style={[styles.weekEventTitle, isDark && styles.weekEventTitleDark]}>
+                              {event.title}
+                            </Text>
+
+                            {event.location && (
+                              <Text style={[styles.weekEventLocation, isDark && styles.weekEventLocationDark]}>
+                                📍 {event.location}
+                              </Text>
+                            )}
+
+                            {event.assignedTo && (
+                              <Text style={[styles.weekEventTechnician, isDark && styles.weekEventTechnicianDark]}>
+                                👤 {event.assignedTo}
+                              </Text>
+                            )}
+
+                            {event.status && (
+                              <View style={styles.weekEventStatusContainer}>
+                                <View style={[
+                                  styles.weekEventStatus,
+                                  event.status === 'completed' && styles.statusCompleted,
+                                  event.status === 'in-progress' && styles.statusInProgress,
+                                  event.status === 'scheduled' && styles.statusScheduled,
+                                  isDark && styles.weekEventStatusDark
+                                ]}>
+                                  <Text style={[
+                                    styles.weekEventStatusText,
+                                    event.status === 'completed' && styles.statusTextCompleted,
+                                    event.status === 'in-progress' && styles.statusTextInProgress,
+                                    event.status === 'scheduled' && styles.statusTextScheduled
+                                  ]}>
+                                    {event.status === 'completed' ? 'Completado' :
+                                     event.status === 'in-progress' ? 'En progreso' :
+                                     event.status === 'scheduled' ? 'Programado' : 
+                                     event.status}
+                                  </Text>
+                                </View>
+                              </View>
+                            )}
+                          </View>
+                        </TouchableOpacity>
                       );
                     })}
                   </View>
-                </ScrollView>
-              </View>
+                );
+              })}
+
+              {/* Mensaje cuando no hay eventos en la semana */}
+              {weekDays.every(date => getEventsForDate(date).length === 0) && (
+                <View style={styles.weekNoEvents}>
+                  <Ionicons name="calendar-outline" size={64} color={isDark ? '#48484A' : '#C7C7CC'} />
+                  <Text style={[styles.weekNoEventsTitle, isDark && styles.weekNoEventsTitleDark]}>
+                    Sin eventos esta semana
+                  </Text>
+                  <Text style={[styles.weekNoEventsSubtitle, isDark && styles.weekNoEventsSubtitleDark]}>
+                    Toca el botón + para programar un nuevo monitoreo
+                  </Text>
+                </View>
+              )}
+
+              <View style={{ height: 20 }} />
             </ScrollView>
           </View>
         )}
       </View>
 
-      {/* ✅ MODAL PICKER DE MES/AÑO */}
       <Modal
         visible={showMonthPicker}
         transparent
@@ -1105,11 +973,17 @@ export default function CalendarView() {
           <View style={[styles.pickerContainer, isDark && styles.pickerContainerDark]}>
             <View style={styles.pickerHeader}>
               <TouchableOpacity onPress={() => setShowMonthPicker(false)}>
-                <Text style={[styles.pickerButton, isDark && styles.pickerButtonDark]}>Cancelar</Text>
+                <Text style={[styles.pickerButton, isDark && styles.pickerButtonDark]}>
+                  Cancelar
+                </Text>
               </TouchableOpacity>
-              <Text style={[styles.pickerTitle, isDark && styles.pickerTitleDark]}>Seleccionar Fecha</Text>
+              <Text style={[styles.pickerTitle, isDark && styles.pickerTitleDark]}>
+                Seleccionar Fecha
+              </Text>
               <TouchableOpacity onPress={applyMonthYearSelection}>
-                <Text style={[styles.pickerButton, styles.pickerButtonDone]}>Listo</Text>
+                <Text style={[styles.pickerButton, styles.pickerButtonDone]}>
+                  Listo
+                </Text>
               </TouchableOpacity>
             </View>
             
@@ -1120,7 +994,12 @@ export default function CalendarView() {
                 onValueChange={(value) => setPickerMonth(value)}
               >
                 {monthNames.map((month, index) => (
-                  <Picker.Item key={index} label={month} value={index} color={isDark ? '#FFFFFF' : '#000000'} />
+                  <Picker.Item 
+                    key={index} 
+                    label={month} 
+                    value={index} 
+                    color={isDark ? '#FFFFFF' : '#000000'} 
+                  />
                 ))}
               </Picker>
               
@@ -1130,7 +1009,12 @@ export default function CalendarView() {
                 onValueChange={(value) => setPickerYear(value)}
               >
                 {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 5 + i).map((year) => (
-                  <Picker.Item key={year} label={String(year)} value={year} color={isDark ? '#FFFFFF' : '#000000'} />
+                  <Picker.Item 
+                    key={year} 
+                    label={String(year)} 
+                    value={year} 
+                    color={isDark ? '#FFFFFF' : '#000000'} 
+                  />
                 ))}
               </Picker>
             </View>
@@ -1138,7 +1022,6 @@ export default function CalendarView() {
         </View>
       </Modal>
 
-      {/* ✅ MODAL DE BÚSQUEDA */}
       <Modal
         visible={showSearchModal}
         animationType="slide"
@@ -1147,52 +1030,104 @@ export default function CalendarView() {
         <View style={[styles.searchContainer, isDark && styles.searchContainerDark]}>
           <View style={[styles.searchHeader, isDark && styles.searchHeaderDark]}>
             <View style={[styles.searchInputContainer, isDark && styles.searchInputContainerDark]}>
-              <Ionicons name="search" size={20} color="#8E8E93" style={{ marginRight: 8 }} />
+              <Ionicons name="search" size={20} color="#8E8E93" style={styles.searchIcon} />
               <TextInput
                 style={[styles.searchInput, isDark && styles.searchInputDark]}
-                placeholder="Buscar eventos..."
+                placeholder="Buscar eventos, ubicaciones..."
                 placeholderTextColor="#8E8E93"
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 autoFocus
+                returnKeyType="search"
               />
             </View>
-            <TouchableOpacity onPress={() => { setShowSearchModal(false); setSearchQuery(''); }}>
-              <Text style={[styles.cancelButton, { color: isDark ? THEME_COLOR_DARK : THEME_COLOR }]}>Cancelar</Text>
+            <TouchableOpacity 
+              onPress={() => { 
+                setShowSearchModal(false); 
+                setSearchQuery(''); 
+              }}
+            >
+              <Text style={[styles.cancelButton, { color: isDark ? THEME_COLOR_DARK : THEME_COLOR }]}>
+                Cancelar
+              </Text>
             </TouchableOpacity>
           </View>
           
           <ScrollView style={styles.searchResults}>
-            {filteredEvents.length > 0 ? (
-              filteredEvents.map((event) => (
-                <TouchableOpacity
-                  key={event.id}
-                  style={[styles.searchResultItem, isDark && styles.searchResultItemDark]}
-                  onPress={() => {
-                    const eventDate = new Date(event.date);
-                    setSelectedDate(eventDate);
-                    setCurrentDate(eventDate);
-                    setShowSearchModal(false);
-                    setSearchQuery('');
-                  }}
-                >
-                  <View style={[styles.searchResultBar, { backgroundColor: isDark ? matrixConfig[event.matrix].darkColor : matrixConfig[event.matrix].color }]} />
-                  <View style={styles.searchResultContent}>
-                    <Text style={[styles.searchResultTitle, isDark && styles.searchResultTitleDark]}>{event.title}</Text>
-                    <Text style={[styles.searchResultDetails, isDark && styles.searchResultDetailsDark]}>
-                      {event.date} • {event.startTime} - {event.endTime}
-                    </Text>
-                    <Text style={[styles.searchResultLocation, isDark && styles.searchResultLocationDark]}>
-                      📍 {event.location}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))
+            {searchQuery.trim() === '' ? (
+              <View style={styles.searchEmptyState}>
+                <Ionicons name="search-outline" size={64} color={isDark ? '#48484A' : '#C7C7CC'} />
+                <Text style={[styles.searchEmptyTitle, isDark && styles.searchEmptyTitleDark]}>
+                  Buscar Eventos
+                </Text>
+                <Text style={[styles.searchEmptySubtitle, isDark && styles.searchEmptySubtitleDark]}>
+                  Busca por título, ubicación o descripción
+                </Text>
+              </View>
+            ) : filteredEvents.length > 0 ? (
+              <>
+                <View style={styles.searchResultsHeader}>
+                  <Text style={[styles.searchResultsCount, isDark && styles.searchResultsCountDark]}>
+                    {filteredEvents.length} resultado{filteredEvents.length !== 1 ? 's' : ''} encontrado{filteredEvents.length !== 1 ? 's' : ''}
+                  </Text>
+                </View>
+                {filteredEvents.map((event) => {
+                  const eventType = event.type || 'monitoring';
+                  const config = matrixConfig[eventType] || matrixConfig.aire;
+                  
+                  return (
+                    <TouchableOpacity
+                      key={event.id}
+                      style={[styles.searchResultItem, isDark && styles.searchResultItemDark]}
+                      onPress={() => {
+                        const eventDate = new Date(event.date);
+                        setSelectedDate(eventDate);
+                        setCurrentDate(eventDate);
+                        setShowSearchModal(false);
+                        setSearchQuery('');
+                      }}
+                    >
+                      <View style={[
+                        styles.searchResultBar, 
+                        { backgroundColor: isDark ? config.darkColor : config.color }
+                      ]} />
+                      <View style={styles.searchResultContent}>
+                        <View style={styles.searchResultHeader}>
+                          <Text style={[styles.searchResultTitle, isDark && styles.searchResultTitleDark]}>
+                            {event.title}
+                          </Text>
+                          <Ionicons
+                            name={config.icon as any}
+                            size={16}
+                            color={isDark ? config.darkColor : config.color}
+                          />
+                        </View>
+                        <Text style={[styles.searchResultDetails, isDark && styles.searchResultDetailsDark]}>
+                          {event.date} • {event.startTime} - {event.endTime || 'Sin hora fin'}
+                        </Text>
+                        {event.location && (
+                          <Text style={[styles.searchResultLocation, isDark && styles.searchResultLocationDark]}>
+                            📍 {event.location}
+                          </Text>
+                        )}
+                        {event.description && (
+                          <Text style={[styles.searchResultDescription, isDark && styles.searchResultDescriptionDark]}>
+                            {event.description}
+                          </Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
             ) : (
               <View style={styles.noSearchResults}>
-                <Ionicons name="search-outline" size={64} color="#8E8E93" />
+                <Ionicons name="document-outline" size={64} color={isDark ? '#48484A' : '#C7C7CC'} />
                 <Text style={[styles.noSearchResultsText, isDark && styles.noSearchResultsTextDark]}>
-                  {searchQuery ? 'No se encontraron eventos' : 'Busca eventos por título, ubicación o técnico'}
+                  Sin resultados
+                </Text>
+                <Text style={[styles.noSearchResultsSubtext, isDark && styles.noSearchResultsSubtextDark]}>
+                  No se encontraron eventos para "{searchQuery}"
                 </Text>
               </View>
             )}
@@ -1200,10 +1135,11 @@ export default function CalendarView() {
         </View>
       </Modal>
 
+      {/* Modal de crear evento limpio */}
       <CreateEventModal
         isVisible={showCreateModal}
         onClose={closeCreateModal}
-        onCreateEvent={handleCreateEvent} // ✅ FUNCIÓN REAL
+        onCreateEvent={handleCreateEvent}
         selectedDate={selectedDate}
         isDark={isDark}
       />
@@ -1211,6 +1147,9 @@ export default function CalendarView() {
   );
 }
 
+// ===================================
+// 🎨 ESTILOS COMPLETOS
+// ===================================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1220,6 +1159,99 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
   
+  centerContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+
+  loadingTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#000000',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  loadingTitleDark: {
+    color: '#FFFFFF',
+  },
+  
+  loadingSubtitle: {
+    fontSize: 16,
+    color: '#8E8E93',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  loadingSubtitleDark: {
+    color: '#8E8E93',
+  },
+
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#FF6B6B',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  errorTitleDark: {
+    color: '#FF6B6B',
+  },
+  
+  errorSubtitle: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  errorSubtitleDark: {
+    color: '#8E8E93',
+  },
+
+  errorMessage: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginTop: 8,
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  errorMessageDark: {
+    color: '#8E8E93',
+  },
+
+  syncIndicator: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : StatusBar.currentHeight || 40,
+    right: 16,
+    zIndex: 1000,
+  },
+
+  syncBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    gap: 6,
+  },
+  syncBadgeDark: {
+    backgroundColor: '#1C1C1E',
+  },
+
+  syncText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#000000',
+  },
+  syncTextDark: {
+    color: '#FFFFFF',
+  },
+  
   header: {
     backgroundColor: '#F2F2F7',
     paddingBottom: 8,
@@ -1227,8 +1259,11 @@ const styles = StyleSheet.create({
   headerDark: {
     backgroundColor: '#000000',
   },
+
+  statusBarSpacer: {
+    height: Platform.OS === 'ios' ? 50 : StatusBar.currentHeight || 40,
+  },
   
-  // ✅ ACTUALIZADO - Header content alineado a la izquierda
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1237,11 +1272,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   
-  // ✅ ACTUALIZADO - Título alineado a la izquierda
   monthYearContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-start',
   },
   
   monthYear: {
@@ -1252,12 +1285,15 @@ const styles = StyleSheet.create({
   monthYearDark: {
     color: '#FFFFFF',
   },
+
+  chevronIcon: {
+    marginLeft: 6,
+  },
   
-  // ✅ ACTUALIZADO - Acciones a la derecha
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    gap: 4,
   },
   
   headerActionButton: {
@@ -1265,14 +1301,14 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 4,
+    borderRadius: 20,
   },
   
-  // ✅ ACTUALIZADO - Subtitle alineado con controles
   subtitleContainer: {
     paddingHorizontal: 16,
     paddingBottom: 8,
   },
+
   subtitle: {
     fontSize: 16,
     color: '#8E8E93',
@@ -1358,6 +1394,7 @@ const styles = StyleSheet.create({
   filtersContent: {
     gap: 8,
   },
+
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1379,6 +1416,7 @@ const styles = StyleSheet.create({
   filterChipActiveDark: {
     backgroundColor: '#30D158',
   },
+
   filterChipText: {
     fontSize: 14,
     fontWeight: '600',
@@ -1400,6 +1438,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     paddingHorizontal: 16,
   },
+
   weekDay: {
     textAlign: 'center',
     fontSize: 12,
@@ -1458,15 +1497,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: 32,
     height: 32,
+    borderRadius: 16,
   },
   
   todayCircle: {
     backgroundColor: '#FF3B30',
-    borderRadius: 16,
   },
   todayCircleDark: {
     backgroundColor: '#FF453A',
-    borderRadius: 16,
   },
   
   selectedDay: {
@@ -1484,7 +1522,6 @@ const styles = StyleSheet.create({
     color: '#000000',
     textAlign: 'center',
   },
-  
   dayNumberDark: {
     color: '#FFFFFF',
   },
@@ -1527,178 +1564,23 @@ const styles = StyleSheet.create({
     bottom: 4,
     gap: 2,
     alignItems: 'center',
+    maxWidth: 30,
   },
+
   eventDot: {
     width: 4,
     height: 4,
     borderRadius: 2,
   },
-  sundayIndicator: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    backgroundColor: 'rgba(142, 78, 198, 0.2)',
-    borderRadius: 6,
-    width: 12,
-    height: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
 
-  weekViewContainer: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  weekViewContainerDark: {
-    backgroundColor: '#000000',
-  },
-
-  weekHeaderFixed: {
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5EA',
-  },
-  weekHeaderFixedDark: {
-    backgroundColor: '#000000',
-    borderBottomColor: '#38383A',
-  },
-
-  timeHeaderCorner: {
-    width: 70,
-    backgroundColor: '#FFFFFF',
-    borderRightWidth: 1,
-    borderRightColor: '#E5E5EA',
-  },
-  timeHeaderCornerDark: {
-    backgroundColor: '#000000',
-    borderRightColor: '#38383A',
-  },
-
-  dayHeaderColumn: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderRightWidth: 1,
-    borderRightColor: '#E5E5EA',
-  },
-
-  dayHeaderLabel: {
-    fontSize: 11,
+  moreEventsText: {
+    fontSize: 8,
+    color: '#8E8E93',
     fontWeight: '600',
+    marginLeft: 2,
+  },
+  moreEventsTextDark: {
     color: '#8E8E93',
-    marginBottom: 4,
-  },
-  abelDark: {
-    color: '#8E8E93',
-  },
-
-  dayHeaderNumber: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  selectedCircle: {
-    backgroundColor: '#E5E5EA',
-  },
-  selectedCircleDark: {
-    backgroundColor: '#2C2C2E',
-  },
-
-  dayHeaderNumberText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000000',
-  },
-  dayHeaderNumberTextDark: {
-    color: '#FFFFFF',
-  },
-  dayHeaderNumberTextActive: {
-    color: '#FFFFFF',
-  },
-
-  weekScrollContainer: {
-    flex: 1,
-  },
-
-  weekGridContainer: {
-    flexDirection: 'row',
-  },
-
-  timeColumn: {
-    width: 70,
-    backgroundColor: '#FFFFFF',
-    borderRightWidth: 1,
-    borderRightColor: '#E5E5EA',
-  },
-  timeColumnDark: {
-    backgroundColor: '#000000',
-    borderRightColor: '#38383A',
-  },
-
-  timeSlot: {
-    height: 60,
-    justifyContent: 'flex-start',
-    alignItems: 'center',
-    paddingTop: 4,
-  },
-
-  timeLabel: {
-    fontSize: 11,
-    color: '#8E8E93',
-    fontWeight: '500',
-  },
-  timeLabelDark: {
-    color: '#8E8E93',
-  },
-
-  daysContainer: {
-    position: 'relative',
-  },
-
-  gridLine: {
-    height: 60,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F2F2F2',
-  },
-  gridLineDark: {
-    borderBottomColor: '#1C1C1E',
-  },
-
-  dayColumn: {
-    position: 'absolute',
-    top: 0,
-    height: 60 * 24,
-    borderRightWidth: 1,
-    borderRightColor: '#E5E5EA',
-  },
-  dayColumnDark: {
-    borderRightColor: '#38383A',
-  },
-
-  weekEvent: {
-    position: 'absolute',
-    left: 2,
-    right: 2,
-    borderRadius: 4,
-    padding: 4,
-    borderLeftWidth: 3,
-    borderLeftColor: 'rgba(255,255,255,0.5)',
-  },
-
-  weekEventTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 2,
-  },
-
-  weekEventTime: {
-    fontSize: 9,
-    color: '#FFFFFF',
-    opacity: 0.9,
   },
 
   dayEvents: {
@@ -1716,12 +1598,14 @@ const styles = StyleSheet.create({
   dayEventsDark: {
     backgroundColor: '#1C1C1E',
   },
+
   dayEventsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
   },
+
   dayEventsTitle: {
     fontSize: 20,
     fontWeight: '700',
@@ -1730,74 +1614,36 @@ const styles = StyleSheet.create({
   dayEventsTitleDark: {
     color: '#FFFFFF',
   },
+
   eventStats: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
+
   eventCount: {
     fontSize: 15,
     color: '#8E8E93',
+    fontWeight: '500',
   },
   eventCountDark: {
     color: '#8E8E93',
   },
   
-  overtimeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(142, 78, 198, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
-  },
-  overtimeBadgeDark: {
-    backgroundColor: 'rgba(191, 90, 242, 0.2)',
-  },
-  overtimeBadgeText: {
-    fontSize: 11,
-    color: '#8E4EC6',
-    fontWeight: '600',
-  },
-  overtimeBadgeTextDark: {
-    color: '#BF5AF2',
-  },
-  
-  saturdayBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 122, 255, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 4,
-  },
-  saturdayBadgeDark: {
-    backgroundColor: 'rgba(10, 132, 255, 0.2)',
-  },
-  saturdayBadgeText: {
-    fontSize: 11,
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  saturdayBadgeTextDark: {
-    color: '#0A84FF',
-  },
-  
   eventCard: {
     flexDirection: 'row',
-    backgroundColor: '#F2F2F7',
-    borderRadius: 10,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
     marginBottom: 12,
     overflow: 'hidden',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
+    elevation: 1,
   },
   eventCardDark: {
     backgroundColor: '#2C2C2E',
-  },
-  overtimeEventCard: {
-    borderLeftWidth: 3,
-    borderLeftColor: '#8E4EC6',
   },
   
   priorityBar: {
@@ -1806,89 +1652,136 @@ const styles = StyleSheet.create({
   
   eventContent: {
     flex: 1,
-    padding: 12,
+    padding: 16,
   },
+
   eventHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
+    alignItems: 'flex-start',
+    marginBottom: 8,
   },
+
   eventTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#000000',
+        color: '#000000',
     flex: 1,
+    lineHeight: 22,
   },
   eventTitleDark: {
     color: '#FFFFFF',
   },
+
   eventIcons: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    marginLeft: 12,
   },
+
   eventTime: {
     fontSize: 14,
     color: '#8E8E93',
-    marginBottom: 4,
+    marginBottom: 6,
+    fontWeight: '500',
   },
   eventTimeDark: {
     color: '#8E8E93',
   },
-  overtimeLabel: {
-    color: '#8E4EC6',
-    fontWeight: '600',
-  },
-  overtimeLabelDark: {
-    color: '#BF5AF2',
-  },
-  eventTechnician: {
+
+  eventDescription: {
     fontSize: 14,
-    color: '#8E8E93',
-    marginBottom: 4,
+    color: '#666666',
+    marginBottom: 6,
+    lineHeight: 18,
   },
-  eventTechnicianDark: {
-    color: '#8E8E93',
+  eventDescriptionDark: {
+    color: '#ACACAC',
   },
+
   eventLocation: {
     fontSize: 14,
     color: '#8E8E93',
+    marginBottom: 8,
+    fontWeight: '500',
   },
   eventLocationDark: {
     color: '#8E8E93',
+  },
+
+  statusContainer: {
+    alignItems: 'flex-start',
+  },
+
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#E5E5EA',
+  },
+  statusBadgeDark: {
+    backgroundColor: '#3A3A3C',
+  },
+
+  statusCompleted: {
+    backgroundColor: '#E8F5E8',
+  },
+  statusInProgress: {
+    backgroundColor: '#FFF3CD',
+  },
+  statusScheduled: {
+    backgroundColor: '#E3F2FD',
+  },
+
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666666',
+  },
+
+  statusTextCompleted: {
+    color: '#2E7D32',
+  },
+  statusTextInProgress: {
+    color: '#F57F17',
+  },
+  statusTextScheduled: {
+    color: '#1976D2',
   },
   
   noEvents: {
     alignItems: 'center',
     paddingVertical: 40,
   },
+
   noEventsText: {
-    fontSize: 16,
+    fontSize: 18,
+    fontWeight: '600',
     color: '#C7C7CC',
-    marginTop: 12,
+    marginTop: 16,
     textAlign: 'center',
   },
   noEventsTextDark: {
     color: '#48484A',
   },
+
   noEventsSubtext: {
     fontSize: 14,
     color: '#8E8E93',
     marginTop: 8,
     textAlign: 'center',
-    fontStyle: 'italic',
   },
   noEventsSubtextDark: {
     color: '#8E8E93',
   },
 
-  // ✅ ESTILOS DEL MODAL PICKER
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
+
   pickerContainer: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
@@ -1898,6 +1791,7 @@ const styles = StyleSheet.create({
   pickerContainerDark: {
     backgroundColor: '#1C1C1E',
   },
+
   pickerHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1907,6 +1801,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E5E5EA',
   },
+
   pickerTitle: {
     fontSize: 17,
     fontWeight: '600',
@@ -1915,21 +1810,26 @@ const styles = StyleSheet.create({
   pickerTitleDark: {
     color: '#FFFFFF',
   },
+
   pickerButton: {
     fontSize: 17,
     color: '#007AFF',
+    fontWeight: '500',
   },
   pickerButtonDark: {
     color: '#0A84FF',
   },
+
   pickerButtonDone: {
     fontWeight: '600',
     color: '#4CAF50',
   },
+
   pickersRow: {
     flexDirection: 'row',
     paddingHorizontal: 16,
   },
+
   picker: {
     flex: 1,
     height: 200,
@@ -1938,7 +1838,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#1C1C1E',
   },
 
-  // ✅ ESTILOS DEL MODAL DE BÚSQUEDA
   searchContainer: {
     flex: 1,
     backgroundColor: '#F2F2F7',
@@ -1946,6 +1845,7 @@ const styles = StyleSheet.create({
   searchContainerDark: {
     backgroundColor: '#000000',
   },
+
   searchHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1960,19 +1860,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#1C1C1E',
     borderBottomColor: '#38383A',
   },
+
   searchInputContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F2F2F7',
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
     marginRight: 12,
   },
   searchInputContainerDark: {
     backgroundColor: '#2C2C2E',
   },
+
+  searchIcon: {
+    marginRight: 8,
+  },
+
   searchInput: {
     flex: 1,
     fontSize: 17,
@@ -1981,14 +1887,60 @@ const styles = StyleSheet.create({
   searchInputDark: {
     color: '#FFFFFF',
   },
+
   cancelButton: {
     fontSize: 17,
     fontWeight: '600',
   },
+
   searchResults: {
     flex: 1,
     paddingTop: 16,
   },
+
+  searchEmptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 100,
+    paddingHorizontal: 40,
+  },
+
+  searchEmptyTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#000000',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  searchEmptyTitleDark: {
+    color: '#FFFFFF',
+  },
+
+  searchEmptySubtitle: {
+    fontSize: 16,
+    color: '#8E8E93',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  searchEmptySubtitleDark: {
+    color: '#8E8E93',
+  },
+
+  searchResultsHeader: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+
+  searchResultsCount: {
+    fontSize: 14,
+    color: '#8E8E93',
+    fontWeight: '500',
+  },
+  searchResultsCountDark: {
+    color: '#8E8E93',
+  },
+
   searchResultItem: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
@@ -2005,51 +1957,431 @@ const styles = StyleSheet.create({
   searchResultItemDark: {
     backgroundColor: '#1C1C1E',
   },
+
   searchResultBar: {
     width: 4,
   },
+
   searchResultContent: {
     flex: 1,
-    padding: 12,
+    padding: 16,
   },
+
+  searchResultHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 6,
+  },
+
   searchResultTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#000000',
-    marginBottom: 4,
+    flex: 1,
+    lineHeight: 22,
   },
   searchResultTitleDark: {
     color: '#FFFFFF',
   },
+
   searchResultDetails: {
     fontSize: 14,
     color: '#8E8E93',
-    marginBottom: 4,
+    marginBottom: 6,
+    fontWeight: '500',
   },
   searchResultDetailsDark: {
     color: '#8E8E93',
   },
+
   searchResultLocation: {
     fontSize: 14,
     color: '#8E8E93',
+    marginBottom: 4,
+    fontWeight: '500',
   },
   searchResultLocationDark: {
     color: '#8E8E93',
   },
+
+  searchResultDescription: {
+    fontSize: 13,
+    color: '#666666',
+    lineHeight: 18,
+  },
+  searchResultDescriptionDark: {
+    color: '#ACACAC',
+  },
+
   noSearchResults: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 80,
+    paddingVertical: 100,
     paddingHorizontal: 40,
   },
+
   noSearchResultsText: {
-    fontSize: 16,
-    color: '#8E8E93',
-    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#C7C7CC',
     marginTop: 16,
+    textAlign: 'center',
   },
   noSearchResultsTextDark: {
+    color: '#48484A',
+  },
+
+  noSearchResultsSubtext: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  noSearchResultsSubtextDark: {
+    color: '#8E8E93',
+  },
+
+  // ===================================
+  // 🗓️ ESTILOS DE VISTA DE SEMANA
+  // ===================================
+  weekViewContainer: {
+    flex: 1,
+    backgroundColor: '#F2F2F7',
+  },
+  weekViewContainerDark: {
+    backgroundColor: '#000000',
+  },
+
+  weekHeader: {
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  weekHeaderDark: {
+    backgroundColor: '#1C1C1E',
+    borderBottomColor: '#38383A',
+  },
+
+  weekNavigation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  weekNavButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 20,
+    backgroundColor: '#F2F2F7',
+  },
+  weekNavButtonDark: {
+    backgroundColor: '#2C2C2E',
+  },
+
+  weekTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  weekTitleDark: {
+    color: '#FFFFFF',
+  },
+
+  weekDaysHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  weekDaysHeaderDark: {
+    backgroundColor: '#1C1C1E',
+    borderBottomColor: '#38383A',
+  },
+
+  weekDayColumn: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderRadius: 12,
+    marginHorizontal: 2,
+  },
+
+  weekDaySelected: {
+    backgroundColor: '#E5E5EA',
+  },
+  weekDaySelectedDark: {
+    backgroundColor: '#2C2C2E',
+  },
+
+  weekDayName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8E8E93',
+    marginBottom: 6,
+  },
+  weekDayNameDark: {
+    color: '#8E8E93',
+  },
+
+  weekDayToday: {
+    color: '#4CAF50',
+    fontWeight: '700',
+  },
+
+  weekDayNumber: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+
+  weekDayTodayCircle: {
+    backgroundColor: '#FF3B30',
+  },
+  weekDayTodayCircleDark: {
+    backgroundColor: '#FF453A',
+  },
+
+  weekDaySelectedCircle: {
+    backgroundColor: '#4CAF50',
+  },
+  weekDaySelectedCircleDark: {
+    backgroundColor: '#30D158',
+  },
+
+  weekDayNumberText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  weekDayNumberTextDark: {
+    color: '#FFFFFF',
+  },
+
+  weekDayTodayText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+
+  weekDaySelectedText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+
+  weekEventIndicator: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    minWidth: 16,
+    alignItems: 'center',
+  },
+
+  weekEventCount: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  weekEventCountDark: {
+    color: '#FFFFFF',
+  },
+
+  weekContent: {
+    flex: 1,
+    paddingTop: 16,
+  },
+
+  weekDaySection: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  weekDaySectionDark: {
+    backgroundColor: '#1C1C1E',
+  },
+
+  weekDaySectionSelected: {
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+  },
+
+  weekDaySectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+
+  weekDaySectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  weekDaySectionTitleDark: {
+    color: '#FFFFFF',
+  },
+
+  weekDaySectionToday: {
+    color: '#4CAF50',
+  },
+  weekDaySectionTodayDark: {
+    color: '#30D158',
+  },
+
+  weekDaySectionCount: {
+    fontSize: 14,
+    color: '#8E8E93',
+    fontWeight: '500',
+  },
+  weekDaySectionCountDark: {
+    color: '#8E8E93',
+  },
+
+  weekEventCard: {
+    flexDirection: 'row',
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  weekEventCardDark: {
+    backgroundColor: '#2C2C2E',
+  },
+
+  weekEventTimeBar: {
+    width: 4,
+  },
+
+  weekEventContent: {
+    flex: 1,
+    padding: 12,
+  },
+
+  weekEventHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+
+  weekEventTimeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  weekEventTime: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+  weekEventTimeDark: {
+    color: '#30D158',
+  },
+
+  weekEventTimeDivider: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginLeft: 4,
+  },
+  weekEventTimeDividerDark: {
+    color: '#8E8E93',
+  },
+
+  weekEventIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+
+  weekEventTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 4,
+  },
+  weekEventTitleDark: {
+    color: '#FFFFFF',
+  },
+
+  weekEventLocation: {
+    fontSize: 13,
+    color: '#666666',
+    marginBottom: 3,
+  },
+  weekEventLocationDark: {
+    color: '#ACACAC',
+  },
+
+  weekEventTechnician: {
+    fontSize: 13,
+    color: '#666666',
+    marginBottom: 6,
+  },
+  weekEventTechnicianDark: {
+    color: '#ACACAC',
+  },
+
+  weekEventStatusContainer: {
+    alignItems: 'flex-start',
+  },
+
+  weekEventStatus: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    backgroundColor: '#E5E5EA',
+  },
+  weekEventStatusDark: {
+    backgroundColor: '#3A3A3C',
+  },
+
+  weekEventStatusText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#666666',
+  },
+
+  weekNoEvents: {
+    alignItems: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 40,
+  },
+
+  weekNoEventsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#C7C7CC',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  weekNoEventsTitleDark: {
+    color: '#48484A',
+  },
+
+  weekNoEventsSubtitle: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  weekNoEventsSubtitleDark: {
     color: '#8E8E93',
   },
 });
+    
