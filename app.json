@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
@@ -17,9 +17,13 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.lordfoz1app",
       "infoPlist": {
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Esta app necesita acceso a ubicación para rastrear trabajadores en tiempo real y garantizar su seguridad.",
         "NSLocationWhenInUseUsageDescription": "Esta app necesita acceso a ubicación cuando está en uso para mostrar tu posición en el mapa.",
-        "NSLocationAlwaysUsageDescription": "Esta app necesita acceso a ubicación en segundo plano para tracking continuo de seguridad laboral."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Esta app necesita acceso a ubicación para rastrear trabajadores en tiempo real y garantizar su seguridad.",
+        "NSLocationAlwaysUsageDescription": "Esta app necesita acceso a ubicación en segundo plano para tracking continuo de seguridad laboral.",
+        "NSLocationTemporaryUsageDescriptionDictionary": {
+          "PreciseLocation": "Se requiere ubicación precisa durante actividades críticas de monitoreo y seguridad laboral."
+        },
+        "UIBackgroundModes": ["location"]
       }
     },
     "android": {
@@ -31,7 +35,9 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ]
     },
     "web": {
@@ -48,7 +54,20 @@
           "locationWhenInUsePermission": "Esta app necesita acceso a ubicación cuando está en uso para mostrar tu posición en el mapa.",
           "locationAlwaysPermission": "Esta app necesita acceso a ubicación en segundo plano para tracking continuo de seguridad laboral.",
           "isIosBackgroundLocationEnabled": true,
-          "isAndroidBackgroundLocationEnabled": true
+          "isAndroidBackgroundLocationEnabled": true,
+          "foregroundService": {
+            "notificationTitle": "Tracking activo",
+            "notificationBody": "Tu ubicación se está registrando en segundo plano.",
+            "notificationColor": "#10B981"
+          }
+        }
+      ],
+      [
+        "react-native-maps",
+        {
+          "ios": {
+            "googleMapsApiKey": "AIzaSyAcnldObgeNJoeetWA2TouyXl0zzsq5k_0"
+          }
         }
       ]
     ],
